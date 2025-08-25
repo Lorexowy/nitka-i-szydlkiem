@@ -1,7 +1,30 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Heart, Star, ShoppingBag, Users } from 'lucide-react'
+import { Heart, Star, ShoppingBag, Users, ShoppingCart } from 'lucide-react'
+import { ProductService } from '@/lib/products'
+import { Product } from '@/lib/firestore-types'
 
 export default function HomePage() {
+  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const loadFeaturedProducts = async () => {
+      try {
+        const products = await ProductService.getFeaturedProducts(3) // Pokaż 3 polecane
+        setFeaturedProducts(products)
+      } catch (error) {
+        console.error('Error loading featured products:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadFeaturedProducts()
+  }, [])
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
@@ -108,6 +131,105 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Featured Products Section */}
+      {(featuredProducts.length > 0 || isLoading) && (
+        <section className="py-16 bg-gray-50">
+          <div className="container-custom">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+                Polecane produkty
+              </h2>
+              <p className="text-lg text-gray-600">
+                Nasze najlepsze i najpopularniejsze produkty
+              </p>
+            </div>
+
+            {isLoading ? (
+              <div className="flex justify-center">
+                <div className="loading-spinner w-8 h-8"></div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {featuredProducts.map((product) => (
+                  <Link
+                    key={product.id}
+                    href={`/produkty/szczegoly/${product.id}`}
+                    className="card card-hover group"
+                  >
+                    <div className="relative overflow-hidden rounded-t-lg">
+                      {product.images.length > 0 ? (
+                        <img
+                          src={product.images[0]}
+                          alt={product.name}
+                          className="w-full h-64 object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-64 bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center">
+                          <Heart className="h-16 w-16 text-pink-300" />
+                        </div>
+                      )}
+                      
+                      <div className="absolute top-2 left-2">
+                        <span className="bg-pink-600 text-white px-2 py-1 rounded text-xs font-semibold">
+                          Polecane
+                        </span>
+                      </div>
+
+                      {product.originalPrice && (
+                        <div className="absolute top-2 right-2">
+                          <span className="bg-red-500 text-white px-2 py-1 rounded text-xs font-semibold">
+                            -{Math.round((1 - product.price / product.originalPrice) * 100)}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-6">
+                      <h3 className="font-semibold text-gray-900 mb-2 text-lg">
+                        {product.name}
+                      </h3>
+                      <p className="text-gray-600 mb-4 line-clamp-2">
+                        {product.description}
+                      </p>
+                      
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xl font-bold text-pink-600">
+                            {product.price.toFixed(2)} zł
+                          </span>
+                          {product.originalPrice && (
+                            <span className="text-sm text-gray-500 line-through">
+                              {product.originalPrice.toFixed(2)} zł
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          product.inStock 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {product.inStock ? 'Dostępny' : 'Brak w magazynie'}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            <div className="text-center mt-8">
+              <Link
+                href="/produkty"
+                className="btn-outline inline-flex items-center space-x-2"
+              >
+                <span>Zobacz wszystkie produkty</span>
+                <ShoppingBag className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* CTA Section */}
       <section className="py-16 bg-gradient-to-r from-blue-600 to-beige-500">

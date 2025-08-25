@@ -2,6 +2,8 @@
 
 import { useState, useEffect, use } from 'react'
 import Link from 'next/link'
+import { ProductService } from '@/lib/products'
+import { Product } from '@/lib/firestore-types'
 import { 
   Star,
   Heart,
@@ -9,99 +11,9 @@ import {
   Grid3X3,
   List,
   Filter,
-  ChevronDown
+  ChevronDown,
+  Package
 } from 'lucide-react'
-
-// Mock data for different categories
-const mockCategoryProducts: Record<string, any[]> = {
-  'torby': [
-    {
-      id: '1',
-      name: 'Szydełkowa torba na zakupy',
-      price: 89.99,
-      category: 'torby',
-      images: ['/placeholder-product.jpg'],
-      featured: true,
-      inStock: true,
-      stockQuantity: 5,
-      rating: 4.8,
-      reviewCount: 24
-    },
-    {
-      id: '5',
-      name: 'Elegancka torebka wieczorowa',
-      price: 125.00,
-      category: 'torby',
-      images: ['/placeholder-product.jpg'],
-      featured: false,
-      inStock: true,
-      stockQuantity: 3,
-      rating: 4.9,
-      reviewCount: 15
-    }
-  ],
-  'czapki': [
-    {
-      id: '2',
-      name: 'Kolorowa czapka zimowa',
-      price: 45.50,
-      category: 'czapki',
-      images: ['/placeholder-product.jpg'],
-      featured: false,
-      inStock: true,
-      stockQuantity: 12,
-      rating: 4.9,
-      reviewCount: 31
-    }
-  ],
-  'szaliki': [
-    {
-      id: '3',
-      name: 'Delikatny szalik',
-      price: 65.00,
-      category: 'szaliki',
-      images: ['/placeholder-product.jpg'],
-      featured: true,
-      inStock: true,
-      stockQuantity: 8,
-      rating: 4.7,
-      reviewCount: 18
-    }
-  ],
-  'dekoracje': [
-    {
-      id: '4',
-      name: 'Przytulna poduszka',
-      price: 120.00,
-      category: 'dekoracje',
-      images: ['/placeholder-product.jpg'],
-      featured: false,
-      inStock: false,
-      stockQuantity: 0,
-      rating: 4.6,
-      reviewCount: 12
-    }
-  ]
-}
-
-const categoryInfo: Record<string, { name: string; description: string }> = {
-  'torby': {
-    name: 'Torby',
-    description: 'Praktyczne i stylowe torby szydełkowe na każdą okazję'
-  },
-  'czapki': {
-    name: 'Czapki',
-    description: 'Ciepłe i kolorowe czapki na chłodne dni'
-  },
-  'szaliki': {
-    name: 'Szaliki',
-    description: 'Eleganckie szaliki dopełniające każdą stylizację'
-  },
-  'dekoracje': {
-    name: 'Dekoracje',
-    description: 'Unikalne dekoracje wnętrzarskie wykonane szydełkiem'
-  }
-}
 
 const sortOptions = [
   { value: 'newest', label: 'Najnowsze' },
@@ -119,18 +31,48 @@ export default function CategoryPage({ params }: CategoryPageProps) {
   // Use React 19's use() hook to read the async params
   const { category } = use(params)
   
-  const [products, setProducts] = useState<any[]>([])
-  const [filteredProducts, setFilteredProducts] = useState<any[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [sortBy, setSortBy] = useState('newest')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showFilters, setShowFilters] = useState(false)
   const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 })
+  const [isLoading, setIsLoading] = useState(true)
+  const [allCategories, setAllCategories] = useState<Record<string, { name: string; description: string }>>({})
 
   // Load products for the category
   useEffect(() => {
-    const categoryProducts = mockCategoryProducts[category] || []
-    setProducts(categoryProducts)
-    setFilteredProducts(categoryProducts)
+    const loadCategoryProducts = async () => {
+      try {
+        let categoryProducts: Product[]
+        
+        // Load products based on category
+        categoryProducts = await ProductService.getProductsByCategory(category)
+        
+        setProducts(categoryProducts)
+        setFilteredProducts(categoryProducts)
+
+        // Generate category info from all products
+        const allProducts = await ProductService.getAllProducts()
+        const categoryInfo = allProducts.reduce((acc: Record<string, { name: string; description: string }>, product) => {
+          if (!acc[product.category]) {
+            acc[product.category] = {
+              name: product.category.charAt(0).toUpperCase() + product.category.slice(1),
+              description: `Sprawdź naszą kolekcję produktów: ${product.category}`
+            }
+          }
+          return acc
+        }, {})
+        
+        setAllCategories(categoryInfo)
+      } catch (error) {
+        console.error('Error loading category products:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadCategoryProducts()
   }, [category])
 
   // Filter and sort products
@@ -151,28 +93,45 @@ export default function CategoryPage({ params }: CategoryPageProps) {
         filtered.sort((a, b) => b.price - a.price)
         break
       case 'rating':
-        filtered.sort((a, b) => b.rating - a.rating)
+        // Temporary sort by name since we don't have ratings yet
+        filtered.sort((a, b) => a.name.localeCompare(b.name))
         break
       case 'name':
         filtered.sort((a, b) => a.name.localeCompare(b.name))
         break
       default:
-        // newest - keep original order
+        // newest - sort by creation date
+        filtered.sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)
         break
     }
 
     setFilteredProducts(filtered)
   }, [products, sortBy, priceRange])
 
-  const currentCategory = categoryInfo[category]
+  const currentCategory = allCategories[category]
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+          <p className="text-gray-600">Ładowanie produktów...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!currentCategory) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
+          <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900 mb-4">
             Kategoria nie została znaleziona
           </h1>
+          <p className="text-gray-600 mb-6">
+            Nie znaleziono produktów w kategorii: {category}
+          </p>
           <Link href="/produkty" className="btn-primary">
             Wróć do produktów
           </Link>
@@ -181,14 +140,22 @@ export default function CategoryPage({ params }: CategoryPageProps) {
     )
   }
 
-  const ProductCard = ({ product }: { product: any }) => (
+  const ProductCard = ({ product }: { product: Product }) => (
     <div className="card card-hover group">
       <Link href={`/produkty/szczegoly/${product.id}`}>
         <div className="relative overflow-hidden rounded-t-lg">
-          {/* Product image placeholder */}
-          <div className="aspect-square bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center">
-            <Heart className="h-12 w-12 text-pink-300" />
-          </div>
+          {/* Product image */}
+          {product.images.length > 0 ? (
+            <img
+              src={product.images[0]}
+              alt={product.name}
+              className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          ) : (
+            <div className="aspect-square bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center">
+              <Heart className="h-12 w-12 text-pink-300" />
+            </div>
+          )}
           
           {/* Product badges */}
           <div className="absolute top-2 left-2 flex flex-col space-y-1">
@@ -200,6 +167,11 @@ export default function CategoryPage({ params }: CategoryPageProps) {
             {!product.inStock && (
               <span className="bg-gray-600 text-white px-2 py-1 rounded text-xs font-semibold">
                 Brak w magazynie
+              </span>
+            )}
+            {product.originalPrice && (
+              <span className="bg-red-500 text-white px-2 py-1 rounded text-xs font-semibold">
+                -{Math.round((1 - product.price / product.originalPrice) * 100)}%
               </span>
             )}
           </div>
@@ -215,29 +187,21 @@ export default function CategoryPage({ params }: CategoryPageProps) {
             {product.name}
           </h3>
           
-          {/* Rating */}
-          <div className="flex items-center space-x-1 mb-2">
-            <div className="flex items-center">
-              {[...Array(5)].map((_, i) => (
-                <Star
-                  key={i}
-                  className={`h-3 w-3 ${
-                    i < Math.floor(product.rating)
-                      ? 'text-yellow-400 fill-current'
-                      : 'text-gray-300'
-                  }`}
-                />
-              ))}
-            </div>
-            <span className="text-xs text-gray-500">
-              ({product.reviewCount})
-            </span>
-          </div>
+          <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+            {product.description}
+          </p>
 
           <div className="flex items-center justify-between">
-            <span className="text-lg font-bold text-pink-600">
-              {product.price.toFixed(2)} zł
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="text-lg font-bold text-pink-600">
+                {product.price.toFixed(2)} zł
+              </span>
+              {product.originalPrice && (
+                <span className="text-sm text-gray-500 line-through">
+                  {product.originalPrice.toFixed(2)} zł
+                </span>
+              )}
+            </div>
             <button
               className="btn-primary px-3 py-1 text-sm flex items-center space-x-1"
               disabled={!product.inStock}
@@ -327,7 +291,7 @@ export default function CategoryPage({ params }: CategoryPageProps) {
                 <div className="card p-4">
                   <h3 className="font-semibold text-gray-900 mb-3">Inne kategorie</h3>
                   <div className="space-y-2">
-                    {Object.entries(categoryInfo).map(([slug, info]) => (
+                    {Object.entries(allCategories).map(([slug, info]) => (
                       <Link
                         key={slug}
                         href={`/produkty/${slug}`}
@@ -340,6 +304,12 @@ export default function CategoryPage({ params }: CategoryPageProps) {
                         {info.name}
                       </Link>
                     ))}
+                    <Link
+                      href="/produkty"
+                      className="block px-3 py-2 rounded transition-colors duration-200 hover:bg-gray-100 text-gray-700 font-medium"
+                    >
+                      Wszystkie kategorie
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -352,7 +322,7 @@ export default function CategoryPage({ params }: CategoryPageProps) {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 space-y-4 sm:space-y-0">
               <div className="flex items-center space-x-4">
                 <span className="text-sm text-gray-600">
-                  {filteredProducts.length} produktów
+                  {isLoading ? 'Ładowanie...' : `${filteredProducts.length} produktów`}
                 </span>
               </div>
 
@@ -396,22 +366,32 @@ export default function CategoryPage({ params }: CategoryPageProps) {
               </div>
             </div>
 
-            {/* Products */}
-            {filteredProducts.length === 0 ? (
+            {/* Loading state */}
+            {isLoading ? (
+              <div className="text-center py-12">
+                <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+                <p className="text-gray-600">Ładowanie produktów...</p>
+              </div>
+            ) : filteredProducts.length === 0 ? (
               <div className="text-center py-12">
                 <Heart className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
                   Nie znaleziono produktów
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  W tej kategorii nie ma produktów spełniających wybrane kryteria
+                  W kategorii "{currentCategory.name}" nie ma produktów spełniających wybrane kryteria
                 </p>
-                <button
-                  onClick={() => setPriceRange({ min: 0, max: 1000 })}
-                  className="btn-primary"
-                >
-                  Wyczyść filtry
-                </button>
+                <div className="flex space-x-4 justify-center">
+                  <button
+                    onClick={() => setPriceRange({ min: 0, max: 1000 })}
+                    className="btn-primary"
+                  >
+                    Wyczyść filtry
+                  </button>
+                  <Link href="/produkty" className="btn-outline">
+                    Zobacz wszystkie produkty
+                  </Link>
+                </div>
               </div>
             ) : (
               <div className={`grid gap-6 ${

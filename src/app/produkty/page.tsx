@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { ProductService } from '@/lib/products'
+import { Product } from '@/lib/firestore-types'
 import { 
   Filter, 
   Grid3X3, 
@@ -14,66 +16,6 @@ import {
   ShoppingCart
 } from 'lucide-react'
 
-// Mock data - later this will come from Firebase
-const mockProducts = [
-  {
-    id: '1',
-    name: 'Szydełkowa torba na zakupy',
-    price: 89.99,
-    category: 'torby',
-    images: ['/placeholder-product.jpg'],
-    featured: true,
-    inStock: true,
-    stockQuantity: 5,
-    rating: 4.8,
-    reviewCount: 24
-  },
-  {
-    id: '2',
-    name: 'Kolorowa czapka zimowa',
-    price: 45.50,
-    category: 'czapki',
-    images: ['/placeholder-product.jpg'],
-    featured: false,
-    inStock: true,
-    stockQuantity: 12,
-    rating: 4.9,
-    reviewCount: 31
-  },
-  {
-    id: '3',
-    name: 'Delikatny szalik',
-    price: 65.00,
-    category: 'szaliki',
-    images: ['/placeholder-product.jpg'],
-    featured: true,
-    inStock: true,
-    stockQuantity: 8,
-    rating: 4.7,
-    reviewCount: 18
-  },
-  {
-    id: '4',
-    name: 'Przytulna poduszka',
-    price: 120.00,
-    category: 'dekoracje',
-    images: ['/placeholder-product.jpg'],
-    featured: false,
-    inStock: false,
-    stockQuantity: 0,
-    rating: 4.6,
-    reviewCount: 12
-  },
-]
-
-const categories = [
-  { id: 'wszystkie', name: 'Wszystkie kategorie', count: mockProducts.length },
-  { id: 'torby', name: 'Torby', count: 1 },
-  { id: 'czapki', name: 'Czapki', count: 1 },
-  { id: 'szaliki', name: 'Szaliki', count: 1 },
-  { id: 'dekoracje', name: 'Dekoracje', count: 1 },
-]
-
 const sortOptions = [
   { value: 'newest', label: 'Najnowsze' },
   { value: 'price-asc', label: 'Cena: od najniższej' },
@@ -84,14 +26,52 @@ const sortOptions = [
 
 function ProductsContent() {
   const searchParams = useSearchParams()
-  const [products, setProducts] = useState(mockProducts)
-  const [filteredProducts, setFilteredProducts] = useState(mockProducts)
+  const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [selectedCategory, setSelectedCategory] = useState('wszystkie')
   const [sortBy, setSortBy] = useState('newest')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showFilters, setShowFilters] = useState(false)
   const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 })
   const [searchQuery, setSearchQuery] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [categories, setCategories] = useState([
+    { id: 'wszystkie', name: 'Wszystkie kategorie', count: 0 }
+  ])
+
+  // Load all products
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        const products = await ProductService.getAllProducts()
+        setAllProducts(products)
+        setFilteredProducts(products)
+        
+        // Generate categories from products
+        const categoryCount = products.reduce((acc: Record<string, number>, product) => {
+          acc[product.category] = (acc[product.category] || 0) + 1
+          return acc
+        }, {})
+
+        const dynamicCategories = [
+          { id: 'wszystkie', name: 'Wszystkie kategorie', count: products.length },
+          ...Object.entries(categoryCount).map(([key, count]) => ({
+            id: key,
+            name: key.charAt(0).toUpperCase() + key.slice(1),
+            count: count as number
+          }))
+        ]
+        
+        setCategories(dynamicCategories)
+      } catch (error) {
+        console.error('Error loading products:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadProducts()
+  }, [])
 
   // Get search query from URL params
   useEffect(() => {
@@ -103,7 +83,7 @@ function ProductsContent() {
 
   // Filter and sort products
   useEffect(() => {
-    let filtered = [...products]
+    let filtered = [...allProducts]
 
     // Filter by category
     if (selectedCategory !== 'wszystkie') {
@@ -112,8 +92,12 @@ function ProductsContent() {
 
     // Filter by search query
     if (searchQuery) {
+      const searchTerm = searchQuery.toLowerCase()
       filtered = filtered.filter(product =>
-        product.name.toLowerCase().includes(searchQuery.toLowerCase())
+        product.name.toLowerCase().includes(searchTerm) ||
+        product.description.toLowerCase().includes(searchTerm) ||
+        product.category.toLowerCase().includes(searchTerm) ||
+        product.materials.some(material => material.toLowerCase().includes(searchTerm))
       )
     }
 
@@ -131,27 +115,37 @@ function ProductsContent() {
         filtered.sort((a, b) => b.price - a.price)
         break
       case 'rating':
-        filtered.sort((a, b) => b.rating - a.rating)
+        // Temporary sort by name since we don't have ratings yet
+        filtered.sort((a, b) => a.name.localeCompare(b.name))
         break
       case 'name':
         filtered.sort((a, b) => a.name.localeCompare(b.name))
         break
       default:
-        // newest - keep original order
+        // newest - sort by creation date
+        filtered.sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)
         break
     }
 
     setFilteredProducts(filtered)
-  }, [products, selectedCategory, sortBy, priceRange, searchQuery])
+  }, [allProducts, selectedCategory, sortBy, priceRange, searchQuery])
 
-  const ProductCard = ({ product }: { product: typeof mockProducts[0] }) => (
+  const ProductCard = ({ product }: { product: Product }) => (
     <div className="card card-hover group">
       <Link href={`/produkty/szczegoly/${product.id}`}>
         <div className="relative overflow-hidden rounded-t-lg">
-          {/* Product image placeholder */}
-          <div className="aspect-square bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center">
-            <Heart className="h-12 w-12 text-pink-300" />
-          </div>
+          {/* Product image */}
+          {product.images.length > 0 ? (
+            <img
+              src={product.images[0]}
+              alt={product.name}
+              className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          ) : (
+            <div className="aspect-square bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center">
+              <Heart className="h-12 w-12 text-pink-300" />
+            </div>
+          )}
           
           {/* Product badges */}
           <div className="absolute top-2 left-2 flex flex-col space-y-1">
@@ -163,6 +157,11 @@ function ProductsContent() {
             {!product.inStock && (
               <span className="bg-gray-600 text-white px-2 py-1 rounded text-xs font-semibold">
                 Brak w magazynie
+              </span>
+            )}
+            {product.originalPrice && (
+              <span className="bg-red-500 text-white px-2 py-1 rounded text-xs font-semibold">
+                -{Math.round((1 - product.price / product.originalPrice) * 100)}%
               </span>
             )}
           </div>
@@ -178,29 +177,21 @@ function ProductsContent() {
             {product.name}
           </h3>
           
-          {/* Rating */}
-          <div className="flex items-center space-x-1 mb-2">
-            <div className="flex items-center">
-              {[...Array(5)].map((_, i) => (
-                <Star
-                  key={i}
-                  className={`h-3 w-3 ${
-                    i < Math.floor(product.rating)
-                      ? 'text-yellow-400 fill-current'
-                      : 'text-gray-300'
-                  }`}
-                />
-              ))}
-            </div>
-            <span className="text-xs text-gray-500">
-              ({product.reviewCount})
-            </span>
-          </div>
+          <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+            {product.description}
+          </p>
 
           <div className="flex items-center justify-between">
-            <span className="text-lg font-bold text-pink-600">
-              {product.price.toFixed(2)} zł
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="text-lg font-bold text-pink-600">
+                {product.price.toFixed(2)} zł
+              </span>
+              {product.originalPrice && (
+                <span className="text-sm text-gray-500 line-through">
+                  {product.originalPrice.toFixed(2)} zł
+                </span>
+              )}
+            </div>
             <button
               className="btn-primary px-3 py-1 text-sm flex items-center space-x-1"
               disabled={!product.inStock}
@@ -321,7 +312,7 @@ function ProductsContent() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 space-y-4 sm:space-y-0">
               <div className="flex items-center space-x-4">
                 <span className="text-sm text-gray-600">
-                  {filteredProducts.length} produktów
+                  {isLoading ? 'Ładowanie...' : `${filteredProducts.length} produktów`}
                 </span>
               </div>
 
@@ -365,15 +356,23 @@ function ProductsContent() {
               </div>
             </div>
 
-            {/* Products */}
-            {filteredProducts.length === 0 ? (
+            {/* Loading state */}
+            {isLoading ? (
+              <div className="text-center py-12">
+                <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+                <p className="text-gray-600">Ładowanie produktów...</p>
+              </div>
+            ) : filteredProducts.length === 0 ? (
               <div className="text-center py-12">
                 <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
                   Nie znaleziono produktów
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  Spróbuj zmienić kryteria wyszukiwania lub filtry
+                  {searchQuery 
+                    ? `Nie znaleziono produktów dla: "${searchQuery}"`
+                    : 'Spróbuj zmienić kryteria wyszukiwania lub filtry'
+                  }
                 </p>
                 <button
                   onClick={() => {
