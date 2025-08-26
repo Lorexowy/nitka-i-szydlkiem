@@ -26,62 +26,24 @@ export class ProductService {
     try {
       const productsCollection = collection(db, this.COLLECTION)
       
-      // Spróbuj z orderBy
-      try {
-        const q = query(productsCollection, orderBy('createdAt', 'desc'))
-        const snapshot = await getDocs(q)
-        
-        return snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Product))
-      } catch (orderError) {
-        console.log('OrderBy failed, getting all products without order')
-        
-        // Fallback: pobierz bez sortowania
-        const snapshot = await getDocs(productsCollection)
-        
-        return snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Product))
-      }
-    } catch (error) {
-      console.error('Error fetching products:', error)
-      return []
-    }
-  }
-
-  // Pobierz produkty z paginacją
-  static async getProductsPaginated(
-    pageSize: number = 12, 
-    lastDoc?: QueryDocumentSnapshot
-  ): Promise<{ products: Product[], lastDoc?: QueryDocumentSnapshot }> {
-    try {
-      const productsCollection = collection(db, this.COLLECTION)
-      let q = query(
-        productsCollection, 
-        orderBy('createdAt', 'desc'),
-        limit(pageSize)
-      )
-
-      if (lastDoc) {
-        q = query(q, startAfter(lastDoc))
-      }
-
-      const snapshot = await getDocs(q)
+      // Prosty query bez sortowania aby uniknąć problemów z indeksami
+      const snapshot = await getDocs(productsCollection)
+      
       const products = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Product))
 
-      return {
-        products,
-        lastDoc: snapshot.docs[snapshot.docs.length - 1]
-      }
+      // Sortuj lokalnie po dacie utworzenia (od najnowszych)
+      return products.sort((a, b) => {
+        if (a.createdAt && b.createdAt) {
+          return b.createdAt.seconds - a.createdAt.seconds
+        }
+        return 0
+      })
     } catch (error) {
-      console.error('Error fetching paginated products:', error)
-      throw new Error('Nie udało się pobrać produktów')
+      console.error('Error fetching products:', error)
+      return []
     }
   }
 
@@ -89,73 +51,78 @@ export class ProductService {
   static async getProductsByCategory(category: string): Promise<Product[]> {
     try {
       const productsCollection = collection(db, this.COLLECTION)
+      
+      // Prosty query tylko z filtrem kategorii
       const q = query(
         productsCollection, 
-        where('category', '==', category),
-        orderBy('createdAt', 'desc')
+        where('category', '==', category)
       )
       const snapshot = await getDocs(q)
       
-      return snapshot.docs.map(doc => ({
+      const products = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Product))
+
+      // Sortuj lokalnie
+      return products.sort((a, b) => {
+        if (a.createdAt && b.createdAt) {
+          return b.createdAt.seconds - a.createdAt.seconds
+        }
+        return 0
+      })
     } catch (error) {
       console.error('Error fetching products by category:', error)
-      throw new Error('Nie udało się pobrać produktów z kategorii')
+      
+      // Fallback: pobierz wszystkie i filtruj lokalnie
+      try {
+        const allProducts = await this.getAllProducts()
+        return allProducts.filter(product => product.category === category)
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError)
+        throw new Error('Nie udało się pobrać produktów z kategorii')
+      }
     }
   }
 
   // Pobierz polecane produkty
   static async getFeaturedProducts(limitCount: number = 6): Promise<Product[]> {
     try {
-      const productsCollection = collection(db, this.COLLECTION)
+      // Najpierw pobierz wszystkie produkty
+      const allProducts = await this.getAllProducts()
       
-      // Najpierw spróbuj z compound query
-      try {
-        const q = query(
-          productsCollection, 
-          where('featured', '==', true),
-          where('inStock', '==', true),
-          orderBy('createdAt', 'desc'),
-          limit(limitCount)
-        )
-        const snapshot = await getDocs(q)
-        
-        return snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Product))
-      } catch (indexError) {
-        console.log('Compound query failed, using simpler approach')
-        
-        // Fallback: pobierz wszystkie produkty i filtruj lokalnie
-        const allProducts = await this.getAllProducts()
-        return allProducts
-          .filter(product => product.featured && product.inStock)
-          .slice(0, limitCount)
-      }
+      // Filtruj lokalnie
+      const featuredProducts = allProducts.filter(product => 
+        product.featured && product.inStock
+      )
+
+      // Zwróć ograniczoną liczbę
+      return featuredProducts.slice(0, limitCount)
     } catch (error) {
       console.error('Error fetching featured products:', error)
       
-      // Final fallback: pobierz ostatnie produkty
-      try {
-        const productsCollection = collection(db, this.COLLECTION)
-        const q = query(
-          productsCollection, 
-          orderBy('createdAt', 'desc'),
-          limit(limitCount)
-        )
-        const snapshot = await getDocs(q)
-        
-        return snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Product))
-      } catch (finalError) {
-        console.error('Final fallback failed:', finalError)
-        return []
+      // Final fallback: zwróć puste
+      return []
+    }
+  }
+
+  // Pobierz produkty z paginacją - uproszczona wersja
+  static async getProductsPaginated(
+    pageSize: number = 12, 
+    lastDoc?: QueryDocumentSnapshot
+  ): Promise<{ products: Product[], lastDoc?: QueryDocumentSnapshot }> {
+    try {
+      // Na razie używaj getAllProducts i paginuj lokalnie
+      const allProducts = await this.getAllProducts()
+      const products = allProducts.slice(0, pageSize)
+
+      return {
+        products,
+        lastDoc: undefined // Tymczasowo wyłącz paginację
       }
+    } catch (error) {
+      console.error('Error fetching paginated products:', error)
+      throw new Error('Nie udało się pobrać produktów')
     }
   }
 
@@ -182,17 +149,11 @@ export class ProductService {
   // Wyszukaj produkty
   static async searchProducts(searchQuery: string): Promise<Product[]> {
     try {
-      const productsCollection = collection(db, this.COLLECTION)
-      const snapshot = await getDocs(productsCollection)
+      // Pobierz wszystkie produkty i filtruj lokalnie
+      const allProducts = await this.getAllProducts()
       
-      // Client-side filtering (Firestore nie ma full-text search)
-      const products = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Product))
-
       const searchTerm = searchQuery.toLowerCase()
-      return products.filter(product =>
+      return allProducts.filter(product =>
         product.name.toLowerCase().includes(searchTerm) ||
         product.description.toLowerCase().includes(searchTerm) ||
         product.category.toLowerCase().includes(searchTerm) ||
@@ -234,8 +195,14 @@ export class ProductService {
   static async updateProduct(id: string, updates: Partial<Product>): Promise<void> {
     try {
       const productDoc = doc(db, this.COLLECTION, id)
+      
+      // Filtruj undefined wartości
+      const cleanUpdates = Object.fromEntries(
+        Object.entries(updates).filter(([_, value]) => value !== undefined)
+      )
+      
       await updateDoc(productDoc, {
-        ...updates,
+        ...cleanUpdates,
         updatedAt: Timestamp.now()
       })
     } catch (error) {
@@ -267,6 +234,33 @@ export class ProductService {
     } catch (error) {
       console.error('Error updating stock:', error)
       throw new Error('Nie udało się zaktualizować stanu magazynowego')
+    }
+  }
+
+  // Pobierz statystyki dla dashboardu
+  static async getProductStats(): Promise<{
+    totalProducts: number
+    inStockProducts: number
+    outOfStockProducts: number
+    featuredProducts: number
+  }> {
+    try {
+      const allProducts = await this.getAllProducts()
+      
+      return {
+        totalProducts: allProducts.length,
+        inStockProducts: allProducts.filter(p => p.inStock).length,
+        outOfStockProducts: allProducts.filter(p => !p.inStock).length,
+        featuredProducts: allProducts.filter(p => p.featured).length
+      }
+    } catch (error) {
+      console.error('Error getting product stats:', error)
+      return {
+        totalProducts: 0,
+        inStockProducts: 0,
+        outOfStockProducts: 0,
+        featuredProducts: 0
+      }
     }
   }
 }

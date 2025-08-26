@@ -23,6 +23,30 @@ const sortOptions = [
   { value: 'name', label: 'Nazwa A-Z' },
 ]
 
+// Mapowanie kategorii na polskie nazwy
+const categoryLabels: Record<string, { name: string; description: string }> = {
+  'torby': { 
+    name: 'Torby', 
+    description: 'Stylowe i praktyczne torby szydełkowe na każdą okazję' 
+  },
+  'czapki': { 
+    name: 'Czapki', 
+    description: 'Ciepłe i modne czapki ręcznie robione' 
+  },
+  'szaliki': { 
+    name: 'Szaliki', 
+    description: 'Miękkie i eleganckie szaliki na chłodne dni' 
+  },
+  'dekoracje': { 
+    name: 'Dekoracje', 
+    description: 'Piękne ozdoby do domu wykonane z miłością' 
+  },
+  'inne': { 
+    name: 'Inne', 
+    description: 'Wyjątkowe produkty szydełkowe, które warto poznać' 
+  }
+}
+
 interface CategoryPageProps {
   params: Promise<{ category: string }>
 }
@@ -38,35 +62,33 @@ export default function CategoryPage({ params }: CategoryPageProps) {
   const [showFilters, setShowFilters] = useState(false)
   const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 })
   const [isLoading, setIsLoading] = useState(true)
-  const [allCategories, setAllCategories] = useState<Record<string, { name: string; description: string }>>({})
+  const [allCategories, setAllCategories] = useState<string[]>([])
 
   // Load products for the category
   useEffect(() => {
     const loadCategoryProducts = async () => {
+      setIsLoading(true)
       try {
-        let categoryProducts: Product[]
+        // Pobierz wszystkie produkty
+        const allProducts = await ProductService.getAllProducts()
         
-        // Load products based on category
-        categoryProducts = await ProductService.getProductsByCategory(category)
+        // Wygeneruj listę dostępnych kategorii
+        const categories = [...new Set(allProducts.map(p => p.category))]
+        setAllCategories(categories)
+        
+        // Filtruj produkty dla obecnej kategorii
+        const categoryProducts = allProducts.filter(product => 
+          product.category.toLowerCase() === category.toLowerCase()
+        )
         
         setProducts(categoryProducts)
         setFilteredProducts(categoryProducts)
-
-        // Generate category info from all products
-        const allProducts = await ProductService.getAllProducts()
-        const categoryInfo = allProducts.reduce((acc: Record<string, { name: string; description: string }>, product) => {
-          if (!acc[product.category]) {
-            acc[product.category] = {
-              name: product.category.charAt(0).toUpperCase() + product.category.slice(1),
-              description: `Sprawdź naszą kolekcję produktów: ${product.category}`
-            }
-          }
-          return acc
-        }, {})
         
-        setAllCategories(categoryInfo)
+        console.log(`Loaded ${categoryProducts.length} products for category: ${category}`)
       } catch (error) {
         console.error('Error loading category products:', error)
+        setProducts([])
+        setFilteredProducts([])
       } finally {
         setIsLoading(false)
       }
@@ -101,14 +123,21 @@ export default function CategoryPage({ params }: CategoryPageProps) {
         break
       default:
         // newest - sort by creation date
-        filtered.sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)
+        filtered.sort((a, b) => {
+          if (a.createdAt && b.createdAt) {
+            return b.createdAt.seconds - a.createdAt.seconds
+          }
+          return 0
+        })
         break
     }
 
     setFilteredProducts(filtered)
   }, [products, sortBy, priceRange])
 
-  const currentCategory = allCategories[category]
+  // Sprawdź czy kategoria jest prawidłowa
+  const currentCategoryInfo = categoryLabels[category.toLowerCase()]
+  const isValidCategory = currentCategoryInfo || allCategories.includes(category.toLowerCase())
 
   if (isLoading) {
     return (
@@ -121,7 +150,7 @@ export default function CategoryPage({ params }: CategoryPageProps) {
     )
   }
 
-  if (!currentCategory) {
+  if (!isValidCategory) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -130,14 +159,29 @@ export default function CategoryPage({ params }: CategoryPageProps) {
             Kategoria nie została znaleziona
           </h1>
           <p className="text-gray-600 mb-6">
-            Nie znaleziono produktów w kategorii: {category}
+            Nie znaleziono produktów w kategorii: <strong>{category}</strong>
           </p>
-          <Link href="/produkty" className="btn-primary">
-            Wróć do produktów
-          </Link>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">
+              Dostępne kategorie: {allCategories.join(', ')}
+            </p>
+            <div className="flex space-x-4 justify-center">
+              <Link href="/produkty" className="btn-primary">
+                Wszystkie produkty
+              </Link>
+              <Link href="/" className="btn-outline">
+                Strona główna
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     )
+  }
+
+  const categoryInfo = currentCategoryInfo || {
+    name: category.charAt(0).toUpperCase() + category.slice(1),
+    description: `Sprawdź naszą kolekcję produktów: ${category}`
   }
 
   const ProductCard = ({ product }: { product: Product }) => (
@@ -145,7 +189,7 @@ export default function CategoryPage({ params }: CategoryPageProps) {
       <Link href={`/produkty/szczegoly/${product.id}`}>
         <div className="relative overflow-hidden rounded-t-lg">
           {/* Product image */}
-          {product.images.length > 0 ? (
+          {product.images && product.images.length > 0 ? (
             <img
               src={product.images[0]}
               alt={product.name}
@@ -224,16 +268,16 @@ export default function CategoryPage({ params }: CategoryPageProps) {
           <span>/</span>
           <Link href="/produkty" className="hover:text-pink-600">Produkty</Link>
           <span>/</span>
-          <span className="text-gray-900">{currentCategory.name}</span>
+          <span className="text-gray-900">{categoryInfo.name}</span>
         </nav>
 
         {/* Page header */}
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-            {currentCategory.name}
+            {categoryInfo.name}
           </h1>
           <p className="text-lg text-gray-600">
-            {currentCategory.description}
+            {categoryInfo.description}
           </p>
         </div>
 
@@ -291,12 +335,12 @@ export default function CategoryPage({ params }: CategoryPageProps) {
                 <div className="card p-4">
                   <h3 className="font-semibold text-gray-900 mb-3">Inne kategorie</h3>
                   <div className="space-y-2">
-                    {Object.entries(allCategories).map(([slug, info]) => (
+                    {Object.entries(categoryLabels).map(([slug, info]) => (
                       <Link
                         key={slug}
                         href={`/produkty/${slug}`}
                         className={`block px-3 py-2 rounded transition-colors duration-200 ${
-                          slug === category
+                          slug === category.toLowerCase()
                             ? 'bg-pink-100 text-pink-800'
                             : 'hover:bg-gray-100 text-gray-700'
                         }`}
@@ -379,7 +423,7 @@ export default function CategoryPage({ params }: CategoryPageProps) {
                   Nie znaleziono produktów
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  W kategorii "{currentCategory.name}" nie ma produktów spełniających wybrane kryteria
+                  W kategorii "{categoryInfo.name}" nie ma produktów spełniających wybrane kryteria
                 </p>
                 <div className="flex space-x-4 justify-center">
                   <button
