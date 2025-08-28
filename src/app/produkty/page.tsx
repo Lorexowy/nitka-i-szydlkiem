@@ -6,6 +6,12 @@ import { useSearchParams } from 'next/navigation'
 import { ProductService } from '@/lib/products'
 import { Product } from '@/lib/firestore-types'
 import { 
+  getAllCategoryGroups, 
+  getCategoriesByGroup,
+  getCategoryById,
+  CATEGORY_GROUPS 
+} from '@/lib/categories'
+import { 
   Filter, 
   Grid3X3, 
   List, 
@@ -13,7 +19,8 @@ import {
   ChevronDown,
   Star,
   Heart,
-  ShoppingCart
+  ShoppingCart,
+  Package2
 } from 'lucide-react'
 
 const sortOptions = [
@@ -29,14 +36,19 @@ function ProductsContent() {
   const [allProducts, setAllProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [selectedCategory, setSelectedCategory] = useState('wszystkie')
+  const [selectedGroup, setSelectedGroup] = useState('wszystkie')
   const [sortBy, setSortBy] = useState('newest')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showFilters, setShowFilters] = useState(false)
   const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 })
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
+
+  const categoryGroups = getAllCategoryGroups()
+
+  // Generate categories with counts
   const [categories, setCategories] = useState([
-    { id: 'wszystkie', name: 'Wszystkie kategorie', count: 0 }
+    { id: 'wszystkie', name: 'Wszystkie kategorie', group: 'wszystkie', count: 0 }
   ])
 
   // Load all products
@@ -54,12 +66,16 @@ function ProductsContent() {
         }, {})
 
         const dynamicCategories = [
-          { id: 'wszystkie', name: 'Wszystkie kategorie', count: products.length },
-          ...Object.entries(categoryCount).map(([key, count]) => ({
-            id: key,
-            name: key.charAt(0).toUpperCase() + key.slice(1),
-            count: count as number
-          }))
+          { id: 'wszystkie', name: 'Wszystkie kategorie', group: 'wszystkie', count: products.length },
+          ...Object.entries(categoryCount).map(([key, count]) => {
+            const categoryInfo = getCategoryById(key)
+            return {
+              id: key,
+              name: categoryInfo?.name || key.charAt(0).toUpperCase() + key.slice(1),
+              group: categoryInfo?.group || 'inne',
+              count: count as number
+            }
+          })
         ]
         
         setCategories(dynamicCategories)
@@ -88,6 +104,12 @@ function ProductsContent() {
     // Filter by category
     if (selectedCategory !== 'wszystkie') {
       filtered = filtered.filter(product => product.category === selectedCategory)
+    }
+
+    // Filter by category group
+    if (selectedGroup !== 'wszystkie') {
+      const groupCategories = getCategoriesByGroup(selectedGroup).map(cat => cat.id)
+      filtered = filtered.filter(product => groupCategories.includes(product.category))
     }
 
     // Filter by search query
@@ -123,12 +145,26 @@ function ProductsContent() {
         break
       default:
         // newest - sort by creation date
-        filtered.sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)
+        filtered.sort((a, b) => {
+          if (a.createdAt && b.createdAt) {
+            return b.createdAt.seconds - a.createdAt.seconds
+          }
+          return 0
+        })
         break
     }
 
     setFilteredProducts(filtered)
-  }, [allProducts, selectedCategory, sortBy, priceRange, searchQuery])
+  }, [allProducts, selectedCategory, selectedGroup, sortBy, priceRange, searchQuery])
+
+  // Group categories by group
+  const categoriesByGroup = categoryGroups.reduce((acc, group) => {
+    const groupCategories = categories.filter(cat => cat.group === group.id && cat.count > 0)
+    if (groupCategories.length > 0) {
+      acc[group.id] = { group, categories: groupCategories }
+    }
+    return acc
+  }, {} as Record<string, { group: any, categories: any[] }>)
 
   const ProductCard = ({ product }: { product: Product }) => (
     <div className="card card-hover group">
@@ -173,9 +209,18 @@ function ProductsContent() {
         </div>
 
         <div className="p-4">
-          <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">
-            {product.name}
-          </h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-gray-900 line-clamp-1 flex-1">
+              {product.name}
+            </h3>
+            <div className="ml-2">
+              {getCategoryById(product.category) && (
+                <span className={`text-xs px-2 py-1 rounded-full ${getCategoryById(product.category)?.color}`}>
+                  {getCategoryById(product.category)?.name}
+                </span>
+              )}
+            </div>
+          </div>
           
           <p className="text-sm text-gray-600 mb-3 line-clamp-2">
             {product.description}
@@ -218,7 +263,7 @@ function ProductsContent() {
           </p>
         </div>
 
-        {/* Search bar */}
+        {/* Search result info */}
         {searchQuery && (
           <div className="mb-6 p-4 bg-pink-50 rounded-lg border border-pink-200">
             <p className="text-pink-800">
@@ -245,28 +290,131 @@ function ProductsContent() {
               </button>
 
               <div className={`space-y-6 ${showFilters ? 'block' : 'hidden lg:block'}`}>
-                {/* Categories */}
+                {/* Category groups */}
                 <div className="card p-4">
-                  <h3 className="font-semibold text-gray-900 mb-3">Kategorie</h3>
+                  <h3 className="font-semibold text-gray-900 mb-3">Grupy kategorii</h3>
                   <div className="space-y-2">
-                    {categories.map((category) => (
+                    <button
+                      onClick={() => {
+                        setSelectedGroup('wszystkie')
+                        setSelectedCategory('wszystkie')
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded transition-colors duration-200 flex items-center justify-between ${
+                        selectedGroup === 'wszystkie'
+                          ? 'bg-pink-100 text-pink-800'
+                          : 'hover:bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      <span>🌟 Wszystkie grupy</span>
+                      <span className="text-sm text-gray-500">
+                        ({allProducts.length})
+                      </span>
+                    </button>
+                    {categoryGroups.map((group) => {
+                      const groupCount = allProducts.filter(product => {
+                        const categoryInfo = getCategoryById(product.category)
+                        return categoryInfo?.group === group.id
+                      }).length
+                      
+                      return (
+                        <button
+                          key={group.id}
+                          onClick={() => {
+                            setSelectedGroup(group.id)
+                            setSelectedCategory('wszystkie')
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded transition-colors duration-200 flex items-center justify-between ${
+                            selectedGroup === group.id
+                              ? 'bg-pink-100 text-pink-800'
+                              : 'hover:bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          <span>{group.icon} {group.name}</span>
+                          <span className="text-sm text-gray-500">
+                            ({groupCount})
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Categories in selected group */}
+                {Object.entries(categoriesByGroup).length > 0 && (
+                  <div className="card p-4">
+                    <h3 className="font-semibold text-gray-900 mb-3">
+                      {selectedGroup === 'wszystkie' ? 'Wszystkie kategorie' : 'Kategorie w grupie'}
+                    </h3>
+                    <div className="space-y-2">
                       <button
-                        key={category.id}
-                        onClick={() => setSelectedCategory(category.id)}
+                        onClick={() => setSelectedCategory('wszystkie')}
                         className={`w-full text-left px-3 py-2 rounded transition-colors duration-200 flex items-center justify-between ${
-                          selectedCategory === category.id
-                            ? 'bg-pink-100 text-pink-800'
+                          selectedCategory === 'wszystkie'
+                            ? 'bg-blue-100 text-blue-800'
                             : 'hover:bg-gray-100 text-gray-700'
                         }`}
                       >
-                        <span>{category.name}</span>
+                        <span>Wszystkie</span>
                         <span className="text-sm text-gray-500">
-                          ({category.count})
+                          ({selectedGroup === 'wszystkie' 
+                            ? allProducts.length 
+                            : allProducts.filter(product => {
+                                const categoryInfo = getCategoryById(product.category)
+                                return categoryInfo?.group === selectedGroup
+                              }).length
+                          })
                         </span>
                       </button>
-                    ))}
+                      
+                      {selectedGroup === 'wszystkie' ? (
+                        // Show all categories grouped
+                        Object.entries(categoriesByGroup).map(([groupId, { group, categories: groupCategories }]) => (
+                          <div key={groupId} className="mb-4">
+                            <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 flex items-center">
+                              {group.icon} {group.name}
+                            </h4>
+                            <div className="space-y-1 ml-2">
+                              {groupCategories.filter(cat => cat.id !== 'wszystkie').map((category) => (
+                                <button
+                                  key={category.id}
+                                  onClick={() => setSelectedCategory(category.id)}
+                                  className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-200 flex items-center justify-between ${
+                                    selectedCategory === category.id
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : 'hover:bg-gray-50 text-gray-600'
+                                  }`}
+                                >
+                                  <span>{category.name}</span>
+                                  <span className="text-xs text-gray-500">
+                                    ({category.count})
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        // Show categories for selected group
+                        categoriesByGroup[selectedGroup]?.categories.filter(cat => cat.id !== 'wszystkie').map((category) => (
+                          <button
+                            key={category.id}
+                            onClick={() => setSelectedCategory(category.id)}
+                            className={`w-full text-left px-3 py-2 rounded transition-colors duration-200 flex items-center justify-between ${
+                              selectedCategory === category.id
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'hover:bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            <span>{category.name}</span>
+                            <span className="text-sm text-gray-500">
+                              ({category.count})
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Price range */}
                 <div className="card p-4">
@@ -314,6 +462,19 @@ function ProductsContent() {
                 <span className="text-sm text-gray-600">
                   {isLoading ? 'Ładowanie...' : `${filteredProducts.length} produktów`}
                 </span>
+                {(selectedGroup !== 'wszystkie' || selectedCategory !== 'wszystkie') && (
+                  <button
+                    onClick={() => {
+                      setSelectedGroup('wszystkie')
+                      setSelectedCategory('wszystkie')
+                      setPriceRange({ min: 0, max: 1000 })
+                      setSearchQuery('')
+                    }}
+                    className="text-sm text-pink-600 hover:text-pink-700"
+                  >
+                    Wyczyść filtry
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center space-x-4">
@@ -364,7 +525,7 @@ function ProductsContent() {
               </div>
             ) : filteredProducts.length === 0 ? (
               <div className="text-center py-12">
-                <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <Package2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
                   Nie znaleziono produktów
                 </h3>
@@ -376,6 +537,7 @@ function ProductsContent() {
                 </p>
                 <button
                   onClick={() => {
+                    setSelectedGroup('wszystkie')
                     setSelectedCategory('wszystkie')
                     setPriceRange({ min: 0, max: 1000 })
                     setSearchQuery('')

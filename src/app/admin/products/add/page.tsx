@@ -8,6 +8,7 @@ import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { ProductService } from '@/lib/products'
 import { useImageUpload } from '@/hooks/useImageUpload'
+import { getCategoryOptionsGrouped, getCategoryById } from '@/lib/categories'
 import { 
   ArrowLeft, 
   Upload, 
@@ -15,16 +16,9 @@ import {
   Save,
   Eye,
   Package,
-  Star
+  Star,
+  Info
 } from 'lucide-react'
-
-const categories = [
-  { value: 'torby', label: 'Torby' },
-  { value: 'czapki', label: 'Czapki' },
-  { value: 'szaliki', label: 'Szaliki' },
-  { value: 'dekoracje', label: 'Dekoracje' },
-  { value: 'inne', label: 'Inne' }
-]
 
 export default function AddProductPage() {
   const [isAdmin, setIsAdmin] = useState(false)
@@ -35,6 +29,9 @@ export default function AddProductPage() {
   const router = useRouter()
   const { uploadImages, isUploading, error: uploadError } = useImageUpload()
 
+  // Get category options grouped by category groups
+  const categoryGroups = getCategoryOptionsGrouped()
+
   // Form state
   const [formData, setFormData] = useState({
     name: '',
@@ -42,7 +39,7 @@ export default function AddProductPage() {
     longDescription: '',
     price: '',
     originalPrice: '',
-    category: 'torby',
+    category: '',
     stockQuantity: '',
     weight: '',
     dimensions: {
@@ -84,7 +81,7 @@ export default function AddProductPage() {
     if (files.length === 0) return
 
     // Sprawdź limit plików (max 5)
-    if (files.length > 5) {
+    if (selectedFiles.length + files.length > 5) {
       alert('Możesz dodać maksymalnie 5 zdjęć')
       return
     }
@@ -101,7 +98,7 @@ export default function AddProductPage() {
       }
     }
 
-    // DODAJ do istniejących plików zamiast zastępować
+    // Dodaj do istniejących plików
     const newFiles = [...selectedFiles, ...files]
     setSelectedFiles(newFiles)
 
@@ -160,13 +157,32 @@ export default function AddProductPage() {
     }))
   }
 
+  // Get category info for display
+  const selectedCategoryInfo = formData.category ? getCategoryById(formData.category) : null
+
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSaving(true)
 
     try {
-      // Create product first to get ID
+      // Walidacja
+      if (!formData.name || !formData.description || !formData.price || !formData.category) {
+        throw new Error('Wypełnij wszystkie wymagane pola')
+      }
+
+      const cleanMaterials = formData.materials.filter(m => m.trim())
+      const cleanColors = formData.colors.filter(c => c.trim())
+
+      if (cleanMaterials.length === 0) {
+        throw new Error('Dodaj przynajmniej jeden materiał')
+      }
+
+      if (cleanColors.length === 0) {
+        throw new Error('Dodaj przynajmniej jeden kolor')
+      }
+
+      // Create product data
       const productData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
@@ -183,26 +199,13 @@ export default function AddProductPage() {
           width: parseFloat(formData.dimensions.width) || 0,
           height: parseFloat(formData.dimensions.height) || 0
         },
-        materials: formData.materials.filter(m => m.trim()),
-        colors: formData.colors.filter(c => c.trim()),
+        materials: cleanMaterials,
+        colors: cleanColors,
         features: formData.features.filter(f => f.trim()),
         featured: formData.featured,
         inStock: formData.inStock && parseInt(formData.stockQuantity) > 0,
         images: [], // Będzie zaktualizowane po upload zdjęć
         createdBy: auth.currentUser?.uid || ''
-      }
-
-      // Walidacja
-      if (!productData.name || !productData.description || !productData.price) {
-        throw new Error('Wypełnij wszystkie wymagane pola')
-      }
-
-      if (productData.materials.length === 0) {
-        throw new Error('Dodaj przynajmniej jeden materiał')
-      }
-
-      if (productData.colors.length === 0) {
-        throw new Error('Dodaj przynajmniej jeden kolor')
       }
 
       // Utwórz produkt
@@ -291,7 +294,7 @@ export default function AddProductPage() {
                 />
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
                   Kategoria *
                 </label>
@@ -302,12 +305,33 @@ export default function AddProductPage() {
                   className="input-field"
                   required
                 >
-                  {categories.map((cat) => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.label}
-                    </option>
+                  <option value="">Wybierz kategorię</option>
+                  {categoryGroups.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
+                
+                {selectedCategoryInfo && (
+                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-start space-x-2">
+                      <Info className="h-4 w-4 text-blue-600 mt-0.5" />
+                      <div>
+                        <p className="text-sm text-blue-800 font-medium">
+                          {selectedCategoryInfo.description}
+                        </p>
+                        <p className="text-xs text-blue-600 mt-1">
+                          Przykłady: {selectedCategoryInfo.examples.slice(0, 3).join(', ')}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center space-x-4">
@@ -324,6 +348,8 @@ export default function AddProductPage() {
                   </span>
                 </label>
               </div>
+
+              <div></div> {/* Empty div for grid spacing */}
 
               <div className="md:col-span-2">
                 <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
