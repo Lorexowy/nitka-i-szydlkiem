@@ -7,7 +7,6 @@ import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { ProductService } from '@/lib/products'
-import { CategoryService } from '@/lib/category-service'
 import { 
   Package, 
   Users, 
@@ -19,22 +18,13 @@ import {
   Trash2,
   LogOut,
   Settings,
-  Grid3X3,
-  Package2,
-  FolderOpen,
-  Database
+  Grid3X3
 } from 'lucide-react'
 
 export default function AdminDashboard() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [products, setProducts] = useState<any[]>([])
-  const [categoryStats, setCategoryStats] = useState({
-    totalCategories: 0,
-    activeCategories: 0,
-    inactiveCategories: 0,
-    categoriesByGroup: {} as Record<string, number>
-  })
   const [stats, setStats] = useState({
     totalProducts: 0,
     totalOrders: 0,
@@ -68,14 +58,6 @@ export default function AdminDashboard() {
         }))
       } catch (error) {
         console.error('Error loading products:', error)
-      }
-
-      // Załaduj statystyki kategorii
-      try {
-        const categoryStatsData = await CategoryService.getCategoryStats()
-        setCategoryStats(categoryStatsData)
-      } catch (error) {
-        console.error('Error loading category stats:', error)
       }
       
       setIsLoading(false)
@@ -150,8 +132,8 @@ export default function AdminDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats cards - rozszerzone o kategorie */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        {/* Stats cards - bez kategorii */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white p-6 rounded-lg shadow-md">
             <div className="flex items-center">
               <div className="p-2 bg-blue-100 rounded-lg">
@@ -160,21 +142,6 @@ export default function AdminDashboard() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Produkty</p>
                 <p className="text-2xl font-bold text-gray-900">{stats.totalProducts}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-lg shadow-md">
-            <div className="flex items-center">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <Grid3X3 className="h-6 w-6 text-purple-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Kategorie</p>
-                <p className="text-2xl font-bold text-gray-900">{categoryStats.totalCategories}</p>
-                <p className="text-xs text-gray-500">
-                  {categoryStats.activeCategories} aktywnych
-                </p>
               </div>
             </div>
           </div>
@@ -193,8 +160,8 @@ export default function AdminDashboard() {
 
           <div className="bg-white p-6 rounded-lg shadow-md">
             <div className="flex items-center">
-              <div className="p-2 bg-orange-100 rounded-lg">
-                <Users className="h-6 w-6 text-orange-600" />
+              <div className="p-2 bg-purple-100 rounded-lg">
+                <Users className="h-6 w-6 text-purple-600" />
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Użytkownicy</p>
@@ -216,10 +183,10 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Quick actions - rozszerzone o zarządzanie kategoriami */}
+        {/* Quick actions - uproszczone */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Szybkie akcje</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <Link
               href="/admin/products/add"
               className="flex items-center space-x-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
@@ -245,14 +212,6 @@ export default function AdminDashboard() {
             </Link>
 
             <Link
-              href="/admin/categories/add"
-              className="flex items-center space-x-3 p-4 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
-            >
-              <FolderOpen className="h-6 w-6 text-indigo-600" />
-              <span className="font-medium text-indigo-900">Dodaj kategorię</span>
-            </Link>
-
-            <Link
               href="/admin/orders"
               className="flex items-center space-x-3 p-4 bg-yellow-50 rounded-lg hover:bg-yellow-100 transition-colors"
             >
@@ -270,135 +229,10 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Kategorie - nowa sekcja */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* Category overview */}
-          <div className="bg-white rounded-lg shadow-md">
-            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-              <h2 className="text-lg font-semibold text-gray-900">Przegląd kategorii</h2>
-              <Link
-                href="/admin/categories"
-                className="text-blue-600 hover:text-blue-700 font-medium text-sm flex items-center space-x-1"
-              >
-                <span>Zobacz wszystkie</span>
-                <FolderOpen className="h-4 w-4" />
-              </Link>
-            </div>
-
-            <div className="p-6">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Aktywne kategorie</span>
-                  <span className="font-semibold text-green-600">
-                    {categoryStats.activeCategories}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Nieaktywne kategorie</span>
-                  <span className="font-semibold text-gray-500">
-                    {categoryStats.inactiveCategories}
-                  </span>
-                </div>
-                
-                {/* Statystyki grup */}
-                {Object.keys(categoryStats.categoriesByGroup).length > 0 && (
-                  <>
-                    <hr className="my-4" />
-                    <h3 className="text-sm font-medium text-gray-900 mb-2">Kategorie według grup:</h3>
-                    <div className="space-y-2">
-                      {Object.entries(categoryStats.categoriesByGroup).map(([group, count]) => (
-                        <div key={group} className="flex justify-between items-center text-sm">
-                          <span className="text-gray-600 capitalize">
-                            {group.replace('_', ' ')}
-                          </span>
-                          <span className="text-gray-900 font-medium">{count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="mt-6 grid grid-cols-2 gap-3">
-                <Link
-                  href="/admin/categories/add"
-                  className="btn-primary text-center text-sm py-2 flex items-center justify-center space-x-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>Dodaj</span>
-                </Link>
-                <Link
-                  href="/admin/categories/import"
-                  className="btn-outline text-center text-sm py-2 flex items-center justify-center space-x-2"
-                >
-                  <Database className="h-4 w-4" />
-                  <span>Import/Export</span>
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          {/* Management tools */}
-          <div className="bg-white rounded-lg shadow-md">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Narzędzia zarządzania</h2>
-            </div>
-
-            <div className="p-6">
-              <div className="grid grid-cols-1 gap-4">
-                <Link
-                  href="/admin/categories"
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Grid3X3 className="h-6 w-6 text-purple-600" />
-                    <div>
-                      <h3 className="font-medium text-gray-900">Zarządzaj kategoriami</h3>
-                      <p className="text-sm text-gray-600">Edytuj, dodawaj i usuwaj kategorie</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold text-gray-900">
-                      {categoryStats.totalCategories}
-                    </div>
-                    <div className="text-xs text-gray-500">kategorii</div>
-                  </div>
-                </Link>
-
-                <Link
-                  href="/admin/categories/add"
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Plus className="h-6 w-6 text-green-600" />
-                    <div>
-                      <h3 className="font-medium text-gray-900">Dodaj kategorię</h3>
-                      <p className="text-sm text-gray-600">Utwórz nową kategorię produktów</p>
-                    </div>
-                  </div>
-                </Link>
-
-                <Link
-                  href="/admin/categories/import"
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Database className="h-6 w-6 text-blue-600" />
-                    <div>
-                      <h3 className="font-medium text-gray-900">Import/Export</h3>
-                      <p className="text-sm text-gray-600">Zarządzaj kategoriami masowo</p>
-                    </div>
-                  </div>
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent products */}
+        {/* Products - zmieniona nazwa z "Ostatnie produkty" na "Produkty" */}
         <div className="bg-white rounded-lg shadow-md">
           <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-gray-900">Ostatnie produkty</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Produkty</h2>
             <Link
               href="/admin/products/add"
               className="btn-primary flex items-center space-x-2"
@@ -434,8 +268,18 @@ export default function AdminDashboard() {
                   <tr key={product.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
-                        <div className="h-10 w-10 bg-gradient-to-br from-pink-100 to-purple-100 rounded-lg flex items-center justify-center mr-4">
-                          <Package2 className="h-5 w-5 text-pink-600" />
+                        <div className="h-12 w-12 flex-shrink-0 mr-4">
+                          {product.images && product.images.length > 0 ? (
+                            <img
+                              src={product.images[0]}
+                              alt={product.name}
+                              className="h-12 w-12 rounded-lg object-cover"
+                            />
+                          ) : (
+                            <div className="h-12 w-12 bg-gradient-to-br from-pink-100 to-purple-100 rounded-lg flex items-center justify-center">
+                              <Package className="h-6 w-6 text-pink-600" />
+                            </div>
+                          )}
                         </div>
                         <div>
                           <div className="text-sm font-medium text-gray-900">

@@ -13,7 +13,6 @@ import {
   User,
   Shield,
   Database,
-  Bell,
   Mail,
   Globe,
   Palette,
@@ -184,7 +183,7 @@ export default function AdminSettingsPage() {
               </div>
             </div>
 
-            {/* Store settings */}
+            {/* Store settings - pozostawione bez zmian */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
                 <Palette className="h-5 w-5" />
@@ -238,49 +237,6 @@ export default function AdminSettingsPage() {
                       Aby zmienić te ustawienia, edytuj plik Header.tsx i Footer.tsx
                     </span>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Notifications settings */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-                <Bell className="h-5 w-5" />
-                <span>Powiadomienia</span>
-              </h2>
-              
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-900">Nowe zamówienia</h3>
-                    <p className="text-xs text-gray-600">Otrzymuj powiadomienia o nowych zamówieniach</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" defaultChecked />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-900">Niski stan magazynowy</h3>
-                    <p className="text-xs text-gray-600">Powiadomienia gdy produkt ma mniej niż 5 sztuk</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" defaultChecked />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-900">Nowe recenzje</h3>
-                    <p className="text-xs text-gray-600">Powiadomienia o nowych opiniach klientów</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
                 </div>
               </div>
             </div>
@@ -360,7 +316,7 @@ export default function AdminSettingsPage() {
               </div>
             </div>
 
-            {/* Quick stats */}
+            {/* Quick stats - pozostawione bez zmian */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Szybkie statystyki</h2>
               
