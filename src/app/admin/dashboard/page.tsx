@@ -7,6 +7,9 @@ import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { ProductService } from '@/lib/products'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { 
   Package, 
   Users, 
@@ -32,6 +35,8 @@ export default function AdminDashboard() {
     totalRevenue: 0
   })
   const router = useRouter()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -76,14 +81,23 @@ export default function AdminDashboard() {
   }
 
   const handleDeleteProduct = async (productId: string) => {
-    if (!confirm('Czy na pewno chcesz usunąć ten produkt?')) return
+    const confirmed = await confirm({
+      title: 'Usuń produkt',
+      message: 'Czy na pewno chcesz usunąć ten produkt? Ta akcja jest nieodwracalna.',
+      confirmText: 'Usuń',
+      cancelText: 'Anuluj',
+      type: 'danger'
+    })
+    
+    if (!confirmed) return
 
     try {
       await ProductService.deleteProduct(productId)
       setProducts(prev => prev.filter(p => p.id !== productId))
+      showSuccess('Produkt usunięty', 'Produkt został pomyślnie usunięty ze sklepu')
     } catch (error) {
       console.error('Error deleting product:', error)
-      alert('Nie udało się usunąć produktu')
+      showError('Błąd usuwania', 'Nie udało się usunąć produktu. Spróbuj ponownie.')
     }
   }
 
@@ -363,6 +377,21 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }

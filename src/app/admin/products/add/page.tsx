@@ -9,6 +9,9 @@ import { AuthService } from '@/lib/auth'
 import { ProductService } from '@/lib/products'
 import { useImageUpload } from '@/hooks/useImageUpload'
 import { getCategoryOptionsGrouped, getCategoryById } from '@/lib/categories'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { 
   ArrowLeft, 
   Upload, 
@@ -28,6 +31,8 @@ export default function AddProductPage() {
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const router = useRouter()
   const { uploadImages, isUploading, error: uploadError } = useImageUpload()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   // Get category options grouped by category groups
   const categoryGroups = getCategoryOptionsGrouped()
@@ -82,18 +87,18 @@ export default function AddProductPage() {
 
     // Sprawdź limit plików (max 5)
     if (selectedFiles.length + files.length > 5) {
-      alert('Możesz dodać maksymalnie 5 zdjęć')
+      showWarning('Limit zdjęć', 'Możesz dodać maksymalnie 5 zdjęć')
       return
     }
 
     // Waliduj każdy plik
     for (const file of files) {
       if (!file.type.startsWith('image/')) {
-        alert(`Plik ${file.name} nie jest obrazem`)
+        showError('Nieprawidłowy format', `Plik ${file.name} nie jest obrazem. Dozwolone formaty: JPEG, PNG, WebP`)
         return
       }
       if (file.size > 10 * 1024 * 1024) {
-        alert(`Plik ${file.name} jest zbyt duży (max 10MB)`)
+        showError('Plik zbyt duży', `Plik ${file.name} jest zbyt duży (maksymalny rozmiar: 10MB)`)
         return
       }
     }
@@ -160,6 +165,25 @@ export default function AddProductPage() {
   // Get category info for display
   const selectedCategoryInfo = formData.category ? getCategoryById(formData.category) : null
 
+  // Handle cancel with confirmation
+  const handleCancel = async () => {
+    if (formData.name || selectedFiles.length > 0 || formData.description) {
+      const confirmed = await confirm({
+        title: 'Opuścić bez zapisywania?',
+        message: 'Masz niezapisane zmiany. Czy na pewno chcesz opuścić tę stronę?',
+        confirmText: 'Tak, opuść',
+        cancelText: 'Zostań tutaj',
+        type: 'warning'
+      })
+
+      if (confirmed) {
+        router.push('/admin/dashboard')
+      }
+    } else {
+      router.push('/admin/dashboard')
+    }
+  }
+
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -168,18 +192,32 @@ export default function AddProductPage() {
     try {
       // Walidacja
       if (!formData.name || !formData.description || !formData.price || !formData.category) {
-        throw new Error('Wypełnij wszystkie wymagane pola')
+        showError('Błąd walidacji', 'Wypełnij wszystkie wymagane pola (nazwa, opis, cena, kategoria)')
+        return
       }
 
       const cleanMaterials = formData.materials.filter(m => m.trim())
       const cleanColors = formData.colors.filter(c => c.trim())
 
       if (cleanMaterials.length === 0) {
-        throw new Error('Dodaj przynajmniej jeden materiał')
+        showError('Błąd walidacji', 'Dodaj przynajmniej jeden materiał')
+        return
       }
 
       if (cleanColors.length === 0) {
-        throw new Error('Dodaj przynajmniej jeden kolor')
+        showError('Błąd walidacji', 'Dodaj przynajmniej jeden kolor')
+        return
+      }
+
+      // Walidacja numerycznych wartości
+      if (isNaN(parseFloat(formData.price)) || parseFloat(formData.price) <= 0) {
+        showError('Błąd walidacji', 'Cena musi być liczbą większą od zera')
+        return
+      }
+
+      if (isNaN(parseInt(formData.stockQuantity)) || parseInt(formData.stockQuantity) < 0) {
+        showError('Błąd walidacji', 'Ilość w magazynie musi być liczbą nieujemną')
+        return
       }
 
       // Create product data
@@ -222,11 +260,23 @@ export default function AddProductPage() {
         })
       }
 
-      // Przekieruj do widoku produktu
-      router.push(`/admin/products/view/${productId}`)
+      // Pokazuj sukces
+      showSuccess(
+        'Produkt utworzony!', 
+        `Produkt "${formData.name}" został pomyślnie dodany do sklepu${imageUrls.length > 0 ? ` z ${imageUrls.length} zdjęciem/zdjęciami` : ''}.`
+      )
+
+      // Przekieruj do widoku produktu po krótkim opóźnieniu
+      setTimeout(() => {
+        router.push(`/admin/products/view/${productId}`)
+      }, 1500)
+
     } catch (error: any) {
       console.error('Error creating product:', error)
-      alert(error.message || 'Nie udało się utworzyć produktu')
+      showError(
+        'Błąd podczas tworzenia produktu', 
+        error.message || 'Nie udało się utworzyć produktu. Sprawdź dane i spróbuj ponownie.'
+      )
     } finally {
       setIsSaving(false)
     }
@@ -692,12 +742,13 @@ export default function AddProductPage() {
 
           {/* Submit buttons */}
           <div className="flex items-center justify-between">
-            <Link
-              href="/admin/dashboard"
+            <button
+              type="button"
+              onClick={handleCancel}
               className="btn-outline"
             >
               Anuluj
-            </Link>
+            </button>
 
             <button
               type="submit"
@@ -721,6 +772,21 @@ export default function AddProductPage() {
           </div>
         </form>
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }

@@ -14,19 +14,41 @@ import {
   Plus,
   Search,
   Filter,
-  MoreVertical,
   Edit,
   Eye,
   Trash2,
   Package,
   Star,
-  ShoppingCart,
   AlertTriangle,
   CheckCircle,
   XCircle,
   Grid3X3,
-  List
+  List,
+  Info,
+  HelpCircle
 } from 'lucide-react'
+
+// Komponent Tooltip
+const Tooltip = ({ children, text }: { children: React.ReactNode; text: string }) => {
+  const [showTooltip, setShowTooltip] = useState(false)
+
+  return (
+    <div className="relative inline-block">
+      <div
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        {children}
+      </div>
+      {showTooltip && (
+        <div className="absolute z-10 px-3 py-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg whitespace-nowrap -top-10 left-1/2 transform -translate-x-1/2">
+          {text}
+          <div className="absolute w-2 h-2 bg-gray-900 transform rotate-45 -bottom-1 left-1/2 -translate-x-1/2"></div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const sortOptions = [
   { value: 'newest', label: 'Najnowsze' },
@@ -51,6 +73,7 @@ export default function AdminProductsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table')
   const [showFilters, setShowFilters] = useState(false)
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+  const [showStatusLegend, setShowStatusLegend] = useState(false)
   const router = useRouter()
 
   // Auth check
@@ -277,6 +300,14 @@ export default function AdminProductsPage() {
             </div>
           </div>
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowStatusLegend(!showStatusLegend)}
+              className="btn-outline flex items-center space-x-2"
+              title="Legenda statusów"
+            >
+              <HelpCircle className="h-4 w-4" />
+              <span className="hidden sm:inline">Legenda</span>
+            </button>
             <Link
               href="/admin/categories"
               className="btn-outline flex items-center space-x-2"
@@ -293,6 +324,34 @@ export default function AdminProductsPage() {
             </Link>
           </div>
         </div>
+
+        {/* Status Legend */}
+        {showStatusLegend && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
+              <Info className="h-4 w-4 mr-2" />
+              Legenda statusów produktów
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="flex items-center space-x-2">
+                <Star className="h-4 w-4 text-yellow-500" />
+                <span className="text-sm text-gray-700">Produkt polecany (promowany na stronie głównej)</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                <span className="text-sm text-gray-700">Produkt dostępny w magazynie</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <XCircle className="h-4 w-4 text-red-500" />
+                <span className="text-sm text-gray-700">Brak produktu w magazynie</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <AlertTriangle className="h-4 w-4 text-orange-500" />
+                <span className="text-sm text-gray-700">Niski stan magazynowy (poniżej 5 sztuk)</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -525,9 +584,13 @@ export default function AdminProductsPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         {product.inStock ? (
-                          <CheckCircle className="h-4 w-4 text-green-500 mr-1" />
+                          <Tooltip text="Produkt dostępny">
+                            <CheckCircle className="h-4 w-4 text-green-500 mr-1 cursor-help" />
+                          </Tooltip>
                         ) : (
-                          <XCircle className="h-4 w-4 text-red-500 mr-1" />
+                          <Tooltip text="Brak w magazynie">
+                            <XCircle className="h-4 w-4 text-red-500 mr-1 cursor-help" />
+                          </Tooltip>
                         )}
                         <span className="text-sm text-gray-900">
                           {product.stockQuantity} szt.
@@ -537,13 +600,19 @@ export default function AdminProductsPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
                         {product.featured && (
-                          <Star className="h-4 w-4 text-yellow-500" />
+                          <Tooltip text="Produkt polecany">
+                            <Star className="h-4 w-4 text-yellow-500 cursor-help" />
+                          </Tooltip>
                         )}
                         {!product.inStock && (
-                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                          <Tooltip text="Produkt niedostępny">
+                            <AlertTriangle className="h-4 w-4 text-red-500 cursor-help" />
+                          </Tooltip>
                         )}
                         {product.inStock && product.stockQuantity < 5 && (
-                          <AlertTriangle className="h-4 w-4 text-orange-500" />
+                          <Tooltip text="Niski stan magazynowy">
+                            <AlertTriangle className="h-4 w-4 text-orange-500 cursor-help" />
+                          </Tooltip>
                         )}
                       </div>
                     </td>
@@ -631,6 +700,11 @@ export default function AdminProductsPage() {
                     {!product.inStock && (
                       <span className="bg-red-500 text-white px-2 py-1 rounded text-xs">
                         Brak
+                      </span>
+                    )}
+                    {product.inStock && product.stockQuantity < 5 && (
+                      <span className="bg-orange-500 text-white px-2 py-1 rounded text-xs">
+                        Niski stan
                       </span>
                     )}
                   </div>
