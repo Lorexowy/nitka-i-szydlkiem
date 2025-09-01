@@ -24,7 +24,11 @@ import {
   Info,
   AlertTriangle,
   Image as ImageIcon,
-  Trash2
+  Trash2,
+  // --- icons used by the calculator ---
+  Calculator,
+  DollarSign,
+  TrendingUp
 } from 'lucide-react'
 
 interface ProductEditPageProps {
@@ -43,13 +47,21 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [existingImages, setExistingImages] = useState<string[]>([])
   const [imagesToDelete, setImagesToDelete] = useState<string[]>([])
+  const [showTaxInfo, setShowTaxInfo] = useState(false)
   const router = useRouter()
   const { uploadImages, deleteImage, isUploading, error: uploadError } = useImageUpload()
-  const { showSuccess, showError, showWarning, showInfo } = useToast()
-  const { confirmation, confirm, closeConfirmation } = useConfirmation()
+  const { showSuccess, showError, showWarning } = useToast()
+  const { confirmation, confirm } = useConfirmation()
 
   // Get category options grouped by category groups
   const categoryGroups = getCategoryOptionsGrouped()
+
+  // --- tax calculator state (same as in Add page) ---
+  const [taxCalculator, setTaxCalculator] = useState({
+    costsAmount: 0,     // PLN
+    costsPercent: 30,   // %
+    isPercentMode: true // true = percentage mode, false = amount mode
+  })
 
   // Form state
   const [formData, setFormData] = useState({
@@ -141,19 +153,63 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
     loadProduct()
   }, [id, isAdmin, router, showError])
 
+  // --- tax calculations (same logic as in Add page) ---
+  const calculateTaxInfo = (grossPrice: number) => {
+    if (!grossPrice || grossPrice <= 0) {
+      return {
+        netPrice: 0,
+        costsAmount: 0,
+        costsPercent: 0,
+        income: 0,
+        tax: 0,
+        netIncome: 0
+      }
+    }
+
+    // Unregistered activity => no VAT
+    const netPrice = grossPrice
+
+    let costsAmount = 0
+    let costsPercent = 0
+
+    if (taxCalculator.isPercentMode) {
+      costsPercent = taxCalculator.costsPercent
+      costsAmount = (netPrice * costsPercent) / 100
+    } else {
+      costsAmount = taxCalculator.costsAmount
+      costsPercent = netPrice > 0 ? (costsAmount / netPrice) * 100 : 0
+    }
+
+    const income = netPrice - costsAmount
+
+    const taxRate = 0.12
+    const taxPerProduct = income > 0 ? income * taxRate : 0
+    const netIncome = income - taxPerProduct
+
+    return {
+      netPrice,
+      costsAmount,
+      costsPercent,
+      income,
+      tax: taxPerProduct,
+      netIncome
+    }
+  }
+
+  const taxInfo = calculateTaxInfo(parseFloat(formData.price) || 0)
+
   // Handle file selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
 
-    // Sprawdź limit plików (max 5 łącznie z istniejącymi)
+    // limit (max 5 total including existing)
     const totalImages = existingImages.length - imagesToDelete.length + selectedFiles.length + files.length
     if (totalImages > 5) {
       showWarning('Limit zdjęć', 'Możesz mieć maksymalnie 5 zdjęć łącznie')
       return
     }
 
-    // Waliduj każdy plik
     for (const file of files) {
       if (!file.type.startsWith('image/')) {
         showError('Nieprawidłowy format', `Plik ${file.name} nie jest obrazem. Dozwolone formaty: JPEG, PNG, WebP`)
@@ -165,11 +221,9 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
       }
     }
 
-    // Dodaj do istniejących plików
     const newFiles = [...selectedFiles, ...files]
     setSelectedFiles(newFiles)
 
-    // Create preview URLs for new files
     const newUrls = files.map(file => URL.createObjectURL(file))
     setPreviewUrls(prev => [...prev, ...newUrls])
   }
@@ -178,18 +232,11 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
   const removeNewFile = (index: number) => {
     const newFiles = selectedFiles.filter((_, i) => i !== index)
     const newUrls = previewUrls.filter((_, i) => i !== index)
-
-    // Revoke the removed URL to prevent memory leaks
     URL.revokeObjectURL(previewUrls[index])
-
     setSelectedFiles(newFiles)
     setPreviewUrls(newUrls)
-
-    // Reset file input
     const fileInput = document.getElementById('images') as HTMLInputElement
-    if (fileInput) {
-      fileInput.value = ''
-    }
+    if (fileInput) fileInput.value = ''
   }
 
   // Mark existing image for deletion
@@ -290,7 +337,7 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
         return
       }
 
-      // Walidacja
+      // Validation
       if (!formData.name || !formData.description || !formData.price || !formData.category) {
         showError('Błąd walidacji', 'Wypełnij wszystkie wymagane pola (nazwa, opis, cena, kategoria)')
         return
@@ -309,7 +356,6 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
         return
       }
 
-      // Walidacja numerycznych wartości
       if (isNaN(parseFloat(formData.price)) || parseFloat(formData.price) <= 0) {
         showError('Błąd walidacji', 'Cena musi być liczbą większą od zera')
         return
@@ -320,17 +366,14 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
         return
       }
 
-      // Create updated product data
       const updatedProductData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
         longDescription: formData.longDescription.trim(),
         price: parseFloat(formData.price),
-        // Tylko dodaj originalPrice jeśli jest wprowadzona
         ...(formData.originalPrice && { originalPrice: parseFloat(formData.originalPrice) }),
         category: formData.category,
         stockQuantity: parseInt(formData.stockQuantity),
-        // Tylko dodaj weight jeśli jest wprowadzona
         ...(formData.weight && { weight: parseFloat(formData.weight) }),
         dimensions: {
           length: parseFloat(formData.dimensions.length) || 0,
@@ -344,10 +387,9 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
         inStock: formData.inStock && parseInt(formData.stockQuantity) > 0
       }
 
-      // Aktualizuj podstawowe dane produktu
       await ProductService.updateProduct(id, updatedProductData)
 
-      // Usuń zaznaczone zdjęcia
+      // delete selected existing images
       for (const imageUrl of imagesToDelete) {
         try {
           await deleteImage(imageUrl)
@@ -356,21 +398,18 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
         }
       }
 
-      // Upload nowych zdjęć jeśli są wybrane
+      // upload new images
       let newImageUrls: string[] = []
       if (selectedFiles.length > 0) {
         newImageUrls = await uploadImages(id, selectedFiles)
       }
 
-      // Zaktualizuj listę zdjęć
+      // merge images
       const remainingImages = existingImages.filter(url => !imagesToDelete.includes(url))
       const allImages = [...remainingImages, ...newImageUrls]
 
-      await ProductService.updateProduct(id, {
-        images: allImages
-      })
+      await ProductService.updateProduct(id, { images: allImages })
 
-      // Pokaż sukces z szczegółami
       const changesCount = [
         hasChanges() && 'dane produktu',
         newImageUrls.length > 0 && `${newImageUrls.length} nowe zdjęcie/zdjęć`,
@@ -382,7 +421,6 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
         `Pomyślnie zapisano zmiany: ${changesCount || 'podstawowe informacje'}.`
       )
 
-      // Przekieruj po krótkim opóźnieniu
       setTimeout(() => {
         router.push(`/admin/products/view/${id}`)
       }, 1500)
@@ -535,7 +573,7 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
                 </label>
               </div>
 
-              <div></div> {/* Empty div for grid spacing */}
+              <div></div> {/* spacing */}
 
               <div className="md:col-span-2">
                 <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
@@ -568,70 +606,244 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
             </div>
           </div>
 
-          {/* Pricing and inventory */}
+          {/* Pricing and tax calculator (same as Add page) */}
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Cena i magazyn</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
+              <DollarSign className="h-5 w-5" />
+              <span>Cena i rozliczenie podatkowe</span>
+            </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div>
-                <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">
-                  Cena *
-                </label>
-                <div className="relative">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Left column - Price inputs */}
+              <div className="space-y-6">
+                <div>
+                  <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">
+                    Cena brutto *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      id="price"
+                      step="0.01"
+                      min="0"
+                      value={formData.price}
+                      onChange={(e) => updateField('price', e.target.value)}
+                      className="input-field pr-12"
+                      placeholder="0.00"
+                      required
+                    />
+                    <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">
+                      zł
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="originalPrice" className="block text-sm font-medium text-gray-700 mb-1">
+                    Cena brutto przed promocją
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      id="originalPrice"
+                      step="0.01"
+                      min="0"
+                      value={formData.originalPrice}
+                      onChange={(e) => updateField('originalPrice', e.target.value)}
+                      className="input-field pr-12"
+                      placeholder="0.00"
+                    />
+                    <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">
+                      zł
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="stockQuantity" className="block text-sm font-medium text-gray-700 mb-1">
+                    Ilość w magazynie *
+                  </label>
                   <input
                     type="number"
-                    id="price"
-                    step="0.01"
+                    id="stockQuantity"
                     min="0"
-                    value={formData.price}
-                    onChange={(e) => updateField('price', e.target.value)}
-                    className="input-field pr-12"
-                    placeholder="0.00"
+                    value={formData.stockQuantity}
+                    onChange={(e) => updateField('stockQuantity', e.target.value)}
+                    className="input-field"
+                    placeholder="0"
                     required
                   />
-                  <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">
-                    zł
-                  </span>
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="originalPrice" className="block text-sm font-medium text-gray-700 mb-1">
-                  Cena przed promocją
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    id="originalPrice"
-                    step="0.01"
-                    min="0"
-                    value={formData.originalPrice}
-                    onChange={(e) => updateField('originalPrice', e.target.value)}
-                    className="input-field pr-12"
-                    placeholder="0.00"
-                  />
-                  <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">
-                    zł
-                  </span>
-                </div>
-              </div>
+              {/* Right column - Tax calculator */}
+              {formData.price && parseFloat(formData.price) > 0 && (
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-200">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-gray-800 flex items-center space-x-2">
+                      <Calculator className="h-4 w-4 text-blue-600" />
+                      <span>Kalkulator podatkowy</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setShowTaxInfo(!showTaxInfo)}
+                      className="p-1 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
+                      title="Informacje o działalności nierejestrowanej"
+                    >
+                      <Info className="h-4 w-4" />
+                    </button>
+                  </div>
 
-              <div>
-                <label htmlFor="stockQuantity" className="block text-sm font-medium text-gray-700 mb-1">
-                  Ilość w magazynie *
-                </label>
-                <input
-                  type="number"
-                  id="stockQuantity"
-                  min="0"
-                  value={formData.stockQuantity}
-                  onChange={(e) => updateField('stockQuantity', e.target.value)}
-                  className="input-field"
-                  placeholder="0"
-                  required
-                />
-              </div>
+                  {/* Inputs */}
+                  <div className="space-y-4 mb-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Szacunkowe koszty (materiały, narzędzia)
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max={formData.price ? parseFloat(formData.price) : undefined}
+                            step="0.01"
+                            value={taxCalculator.isPercentMode ? '' : taxCalculator.costsAmount}
+                            onChange={(e) => {
+                              const amount = parseFloat(e.target.value) || 0
+                              setTaxCalculator(prev => ({
+                                ...prev,
+                                costsAmount: amount,
+                                isPercentMode: false
+                              }))
+                            }}
+                            className="input-field text-xs pr-8"
+                            placeholder="0.00"
+                          />
+                          <span className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs">
+                            zł
+                          </span>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={taxCalculator.isPercentMode ? taxCalculator.costsPercent : ''}
+                            onChange={(e) => {
+                              const percent = parseFloat(e.target.value) || 0
+                              setTaxCalculator(prev => ({
+                                ...prev,
+                                costsPercent: Math.min(100, Math.max(0, percent)),
+                                isPercentMode: true
+                              }))
+                            }}
+                            className="input-field text-xs pr-8"
+                            placeholder="30"
+                          />
+                          <span className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs">
+                            %
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Wpisz kwotę (zł) lub procent (%) kosztów
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Results */}
+                  <div className="bg-white rounded-lg p-4 space-y-2">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Cena netto (bez VAT):</span>
+                      <span className="font-medium">{taxInfo.netPrice.toFixed(2)} zł</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Koszty ({taxInfo.costsPercent.toFixed(1)}%):</span>
+                      <span className="font-medium text-red-500">-{taxInfo.costsAmount.toFixed(2)} zł</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Dochód (po kosztach):</span>
+                      <span className="font-medium">{taxInfo.income.toFixed(2)} zł</span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Podatek dochodowy (12%):</span>
+                      <span className="font-medium text-red-600">{taxInfo.tax.toFixed(2)} zł</span>
+                    </div>
+
+                    <div className="border-t pt-2">
+                      <div className="flex justify-between items-center text-sm font-semibold">
+                        <span className="text-gray-800">Dochód "na rękę":</span>
+                        <span className="text-green-600">{taxInfo.netIncome.toFixed(2)} zł</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3 mt-3">
+                      <div className="flex items-start space-x-2">
+                        <TrendingUp className="h-4 w-4 text-amber-600 mt-0.5" />
+                        <div>
+                          <p className="text-xs text-amber-800 font-medium">
+                            Pamiętaj o podatku:
+                          </p>
+                          <p className="text-sm text-amber-900 font-semibold">
+                            Odłóż {taxInfo.tax.toFixed(2)} zł z tej sprzedaży
+                          </p>
+                          <p className="text-xs text-amber-700 mt-1">
+                            Podatek płacisz raz w roku do 30 kwietnia
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Tax information modal/panel */}
+            {showTaxInfo && (
+              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start space-x-3">
+                  <Info className="h-5 w-5 text-blue-600 mt-0.5" />
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-blue-900 mb-2">
+                      Działalność nierejestrowana - podstawowe informacje
+                    </h4>
+
+                    <div className="text-xs text-blue-800 space-y-2">
+                      <p>
+                        <strong>Limit miesięczny:</strong> 3 499,50 zł przychodu (75% minimalnego wynagrodzenia)
+                      </p>
+                      <p>
+                        <strong>Podatek dochodowy:</strong> Skala podatkowa - 12% do 120 000 zł rocznego dochodu, 32% powyżej
+                      </p>
+                      <p>
+                        <strong>VAT:</strong> Zwolnienie (przychody poniżej 200 000 zł rocznie)
+                      </p>
+                      <p>
+                        <strong>ZUS:</strong> Brak składek (tylko przy sprzedaży produktów)
+                      </p>
+                      <p>
+                        <strong>Rozliczenie:</strong> Roczne w PIT-36, termin do 30 kwietnia roku następnego
+                      </p>
+                      <p>
+                        <strong>Podstawa prawna:</strong> Art. 5 ustawy Prawo przedsiębiorców
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowTaxInfo(false)}
+                      className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      Zwiń informacje
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Product details */}
@@ -711,7 +923,7 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
               {/* Materials */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-3">
-                  Materiały * 
+                  Materiały *
                 </label>
                 <div className="space-y-2">
                   {formData.materials.map((material, index) => (
@@ -725,6 +937,79 @@ export default function ProductEditPage({ params }: ProductEditPageProps) {
                         required={index === 0}
                       />
                       {formData.materials.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeArrayItem('materials', index)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => addArrayItem('materials')}
+                    className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                  >
+                    + Dodaj materiał
+                  </button>
+                </div>
+              </div>
+
+              {/* Colors */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Dostępne kolory *
+                </label>
+                <div className="space-y-2">
+                  {formData.colors.map((color, index) => (
+                    <div key={index} className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={color}
+                        onChange={(e) => updateArrayField('colors', index, e.target.value)}
+                        className="input-field"
+                        placeholder="np. Naturalny"
+                        required={index === 0}
+                      />
+                      {formData.colors.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeArrayItem('colors', index)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => addArrayItem('colors')}
+                    className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                  >
+                    + Dodaj kolor
+                  </button>
+                </div>
+              </div>
+
+              {/* Features */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Cechy produktu
+                </label>
+                <div className="space-y-2">
+                  {formData.features.map((feature, index) => (
+                    <div key={index} className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={feature}
+                        onChange={(e) => updateArrayField('features', index, e.target.value)}
+                        className="input-field"
+                        placeholder="np. Ręcznie robiona"
+                      />
+                      {formData.features.length > 0 && (
                         <button
                           type="button"
                           onClick={() => removeArrayItem('features', index)}
