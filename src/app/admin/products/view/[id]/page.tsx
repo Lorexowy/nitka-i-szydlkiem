@@ -9,6 +9,9 @@ import { AuthService } from '@/lib/auth'
 import { ProductService } from '@/lib/products'
 import { getCategoryById } from '@/lib/categories'
 import { Product } from '@/lib/firestore-types'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { 
   ArrowLeft, 
   Edit, 
@@ -42,8 +45,10 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [product, setProduct] = useState<Product | null>(null)
   const [currentImage, setCurrentImage] = useState(0)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const router = useRouter()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   // Auth check
   useEffect(() => {
@@ -74,7 +79,7 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
       try {
         const productData = await ProductService.getProductById(id)
         if (!productData) {
-          alert('Produkt nie został znaleziony')
+          showError('Produkt nie znaleziony', 'Nie można znaleźć produktu o podanym ID. Możliwe, że został usunięty.')
           router.push('/admin/products')
           return
         }
@@ -82,45 +87,100 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
         setProduct(productData)
       } catch (error) {
         console.error('Error loading product:', error)
-        alert('Nie udało się załadować produktu')
+        showError('Błąd ładowania', 'Nie udało się załadować danych produktu. Sprawdź połączenie i spróbuj ponownie.')
         router.push('/admin/products')
       }
     }
 
     loadProduct()
-  }, [id, isAdmin, router])
+  }, [id, isAdmin, router, showError])
 
   const handleDeleteProduct = async () => {
     if (!product) return
 
+    const confirmed = await confirm({
+      title: 'Usuń produkt',
+      message: `Czy na pewno chcesz usunąć produkt "${product.name}"? Ta akcja jest nieodwracalna i usunie również wszystkie zdjęcia produktu.`,
+      confirmText: 'Usuń produkt',
+      cancelText: 'Anuluj',
+      type: 'danger'
+    })
+
+    if (!confirmed) return
+
     try {
       await ProductService.deleteProduct(product.id)
-      router.push('/admin/products?success=deleted')
+      showSuccess('Produkt usunięty', `Produkt "${product.name}" został pomyślnie usunięty ze sklepu`)
+      
+      // Przekieruj po krótkim opóźnieniu
+      setTimeout(() => {
+        router.push('/admin/products?success=deleted')
+      }, 1500)
     } catch (error) {
       console.error('Error deleting product:', error)
-      alert('Nie udało się usunąć produktu')
+      showError('Błąd usuwania', 'Nie udało się usunąć produktu. Spróbuj ponownie lub skontaktuj się z pomocą techniczną.')
     }
   }
 
   const handleToggleFeatured = async () => {
-    if (!product) return
+    if (!product || isUpdatingStatus) return
 
+    const newStatus = !product.featured
+    const actionText = newStatus ? 'oznaczyć jako polecany' : 'usunąć z polecanych'
+    
+    const confirmed = await confirm({
+      title: newStatus ? 'Oznacz jako polecany' : 'Usuń z polecanych',
+      message: `Czy na pewno chcesz ${actionText} produkt "${product.name}"?`,
+      confirmText: newStatus ? 'Oznacz jako polecany' : 'Usuń z polecanych',
+      cancelText: 'Anuluj',
+      type: 'info'
+    })
+
+    if (!confirmed) return
+
+    setIsUpdatingStatus(true)
+    
     try {
-      const updatedStatus = !product.featured
-      await ProductService.updateProduct(product.id, { featured: updatedStatus })
-      setProduct(prev => prev ? { ...prev, featured: updatedStatus } : null)
+      await ProductService.updateProduct(product.id, { featured: newStatus })
+      setProduct(prev => prev ? { ...prev, featured: newStatus } : null)
       
-      alert(updatedStatus ? 'Produkt został oznaczony jako polecany' : 'Produkt został usunięty z polecanych')
+      showSuccess(
+        'Status zaktualizowany!',
+        newStatus 
+          ? `Produkt "${product.name}" został oznaczony jako polecany i będzie wyświetlany w sekcji polecanych produktów`
+          : `Produkt "${product.name}" został usunięty z polecanych produktów`
+      )
     } catch (error) {
       console.error('Error toggling featured status:', error)
-      alert('Nie udało się zmienić statusu produktu')
+      showError(
+        'Błąd aktualizacji', 
+        `Nie udało się ${actionText.toLowerCase()} produktu. Spróbuj ponownie.`
+      )
+    } finally {
+      setIsUpdatingStatus(false)
     }
   }
 
-  const handleCopyId = () => {
-    if (product) {
-      navigator.clipboard.writeText(product.id)
-      alert('ID produktu zostało skopiowane do schowka')
+  const handleCopyId = async () => {
+    if (!product) return
+
+    try {
+      await navigator.clipboard.writeText(product.id)
+      showSuccess('ID skopiowane!', 'ID produktu zostało skopiowane do schowka')
+    } catch (error) {
+      // Fallback dla starszych przeglądarek
+      const textArea = document.createElement('textarea')
+      textArea.value = product.id
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      try {
+        document.execCommand('copy')
+        showSuccess('ID skopiowane!', 'ID produktu zostało skopiowane do schowka')
+      } catch (fallbackError) {
+        showError('Błąd kopiowania', 'Nie udało się skopiować ID. Skopiuj ręcznie: ' + product.id)
+      }
+      document.body.removeChild(textArea)
     }
   }
 
@@ -197,7 +257,7 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
               <span>Edytuj</span>
             </Link>
             <button
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={handleDeleteProduct}
               className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200 flex items-center space-x-2"
             >
               <Trash2 className="h-4 w-4" />
@@ -365,13 +425,18 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
                   <span className="text-gray-600">Status polecany</span>
                   <button
                     onClick={handleToggleFeatured}
+                    disabled={isUpdatingStatus}
                     className={`flex items-center space-x-2 px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
                       product.featured
                         ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+                    } ${isUpdatingStatus ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    <Star className={`h-4 w-4 ${product.featured ? 'fill-current' : ''}`} />
+                    {isUpdatingStatus ? (
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      <Star className={`h-4 w-4 ${product.featured ? 'fill-current' : ''}`} />
+                    )}
                     <span>{product.featured ? 'Polecany' : 'Zwykły'}</span>
                   </button>
                 </div>
@@ -473,7 +538,8 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
                   <span className="text-gray-600">ID produktu</span>
                   <button
                     onClick={handleCopyId}
-                    className="flex items-center space-x-1 text-blue-600 hover:text-blue-700"
+                    className="flex items-center space-x-1 text-blue-600 hover:text-blue-700 transition-colors"
+                    title="Kliknij aby skopiować"
                   >
                     <span className="font-mono text-sm">{product.id}</span>
                     <Copy className="h-3 w-3" />
@@ -522,48 +588,22 @@ export default function AdminProductViewPage({ params }: ProductViewPageProps) {
             </div>
           </div>
         </div>
-
-        {/* Delete confirmation modal */}
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    Usuń produkt
-                  </h3>
-                </div>
-              </div>
-              
-              <p className="text-gray-600 mb-6">
-                Czy na pewno chcesz usunąć produkt <strong>"{product.name}"</strong>? 
-                Ta akcja jest nieodwracalna i usunie również wszystkie zdjęcia produktu.
-              </p>
-
-              <div className="flex items-center justify-end space-x-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="btn-outline"
-                >
-                  Anuluj
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDeleteConfirm(false)
-                    handleDeleteProduct()
-                  }}
-                  className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200"
-                >
-                  Usuń produkt
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }

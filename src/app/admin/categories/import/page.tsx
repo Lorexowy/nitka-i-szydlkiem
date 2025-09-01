@@ -8,6 +8,9 @@ import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { CategoryService } from '@/lib/category-service'
 import { CategoryInfo, CATEGORIES } from '@/lib/categories'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { 
   ArrowLeft, 
   Download, 
@@ -24,9 +27,12 @@ export default function CategoryImportExportPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isCopying, setIsCopying] = useState(false)
   const [importResults, setImportResults] = useState<{ success: number, errors: string[] } | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const router = useRouter()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   // Auth check
   useEffect(() => {
@@ -55,7 +61,7 @@ export default function CategoryImportExportPage() {
       setSelectedFile(file)
       setImportResults(null)
     } else {
-      alert('Proszę wybrać plik JSON')
+      showError('Nieprawidłowy format pliku', 'Proszę wybrać plik w formacie JSON')
     }
   }
 
@@ -72,18 +78,41 @@ export default function CategoryImportExportPage() {
         throw new Error('Plik musi zawierać tablicę kategorii')
       }
 
+      if (categories.length === 0) {
+        showWarning('Pusty plik', 'Wybrany plik nie zawiera żadnych kategorii do importu')
+        return
+      }
+
+      showInfo('Import w toku', `Rozpoczynam import ${categories.length} kategorii. To może chwilę potrwać...`)
+
       const results = await CategoryService.importCategories(categories)
       setImportResults(results)
 
       if (results.success > 0) {
+        const successMessage = results.errors.length === 0 
+          ? `Pomyślnie zaimportowano wszystkie ${results.success} kategorii`
+          : `Zaimportowano ${results.success} kategorii. ${results.errors.length} kategorii zawierało błędy`
+        
+        if (results.errors.length === 0) {
+          showSuccess('Import zakończony!', successMessage)
+        } else {
+          showWarning('Import częściowo zakończony', successMessage)
+        }
+
         // Refresh page after successful import
         setTimeout(() => {
           router.push('/admin/categories?success=imported')
         }, 3000)
+      } else {
+        showError('Import nieudany', `Wszystkie kategorie zostały odrzucone. Sprawdź format pliku i spróbuj ponownie.`)
       }
     } catch (error: any) {
       console.error('Import error:', error)
-      alert(error.message || 'Błąd podczas importu')
+      if (error.message.includes('JSON')) {
+        showError('Błąd formatu pliku', 'Plik nie jest prawidłowym plikiem JSON. Sprawdź składnię i spróbuj ponownie.')
+      } else {
+        showError('Błąd importu', error.message || 'Wystąpił nieoczekiwany błąd podczas importu kategorii')
+      }
     } finally {
       setIsImporting(false)
     }
@@ -93,6 +122,11 @@ export default function CategoryImportExportPage() {
     setIsExporting(true)
     try {
       const categories = await CategoryService.exportCategories()
+      
+      if (categories.length === 0) {
+        showWarning('Brak kategorii', 'Nie ma kategorii do eksportu w Firebase')
+        return
+      }
       
       const dataStr = JSON.stringify(categories, null, 2)
       const dataBlob = new Blob([dataStr], { type: 'application/json' })
@@ -107,48 +141,74 @@ export default function CategoryImportExportPage() {
       document.body.removeChild(link)
       
       URL.revokeObjectURL(url)
+      
+      showSuccess('Eksport zakończony!', `Pomyślnie wyeksportowano ${categories.length} kategorii z Firebase`)
     } catch (error) {
       console.error('Export error:', error)
-      alert('Błąd podczas eksportu')
+      showError('Błąd eksportu', 'Nie udało się wyeksportować kategorii z Firebase. Sprawdź połączenie z bazą danych.')
     } finally {
       setIsExporting(false)
     }
   }
 
   const handleExportStatic = () => {
-    const staticCategories = Object.values(CATEGORIES)
-    const dataStr = JSON.stringify(staticCategories, null, 2)
-    const dataBlob = new Blob([dataStr], { type: 'application/json' })
-    
-    const url = URL.createObjectURL(dataBlob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `static-categories-${new Date().toISOString().split('T')[0]}.json`
-    
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    
-    URL.revokeObjectURL(url)
+    try {
+      const staticCategories = Object.values(CATEGORIES)
+      const dataStr = JSON.stringify(staticCategories, null, 2)
+      const dataBlob = new Blob([dataStr], { type: 'application/json' })
+      
+      const url = URL.createObjectURL(dataBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `static-categories-${new Date().toISOString().split('T')[0]}.json`
+      
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      URL.revokeObjectURL(url)
+      
+      showSuccess('Eksport zakończony!', `Pomyślnie wyeksportowano ${staticCategories.length} statycznych kategorii`)
+    } catch (error) {
+      console.error('Static export error:', error)
+      showError('Błąd eksportu', 'Nie udało się wyeksportować statycznych kategorii')
+    }
   }
 
   const copyStaticCategoriesToFirebase = async () => {
-    if (!confirm('Czy na pewno chcesz skopiować wszystkie statyczne kategorie do Firebase? To może nadpisać istniejące kategorie.')) {
-      return
-    }
+    const staticCategories = Object.values(CATEGORIES)
+    
+    const confirmed = await confirm({
+      title: 'Kopiuj kategorie do Firebase',
+      message: `Czy na pewno chcesz skopiować wszystkie ${staticCategories.length} statycznych kategorii do Firebase? To może nadpisać istniejące kategorie o tych samych ID.`,
+      confirmText: 'Kopiuj kategorie',
+      cancelText: 'Anuluj',
+      type: 'warning'
+    })
 
-    setIsImporting(true)
+    if (!confirmed) return
+
+    setIsCopying(true)
     try {
-      const staticCategories = Object.values(CATEGORIES)
+      showInfo('Kopiowanie w toku', `Kopiowanie ${staticCategories.length} kategorii do Firebase...`)
+      
       const results = await CategoryService.importCategories(staticCategories)
       setImportResults(results)
 
-      alert(`Skopiowano ${results.success} kategorii. Błędów: ${results.errors.length}`)
+      const successMessage = results.errors.length === 0 
+        ? `Pomyślnie skopiowano wszystkie ${results.success} kategorii do Firebase`
+        : `Skopiowano ${results.success} kategorii. ${results.errors.length} kategorii zawierało błędy`
+
+      if (results.errors.length === 0) {
+        showSuccess('Kopiowanie zakończone!', successMessage)
+      } else {
+        showWarning('Kopiowanie częściowo zakończone', successMessage)
+      }
     } catch (error) {
       console.error('Copy error:', error)
-      alert('Błąd podczas kopiowania kategorii')
+      showError('Błąd kopiowania', 'Nie udało się skopiować kategorii do Firebase. Sprawdź połączenie z bazą danych.')
     } finally {
-      setIsImporting(false)
+      setIsCopying(false)
     }
   }
 
@@ -206,7 +266,7 @@ export default function CategoryImportExportPage() {
                 <button
                   onClick={handleExport}
                   disabled={isExporting}
-                  className="btn-primary flex items-center space-x-2"
+                  className="btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isExporting ? (
                     <>
@@ -225,7 +285,7 @@ export default function CategoryImportExportPage() {
               <div className="p-4 bg-gray-50 rounded-lg">
                 <h3 className="font-medium text-gray-900 mb-2">Statyczne kategorie</h3>
                 <p className="text-gray-600 text-sm mb-3">
-                  Eksportuj wbudowane kategorie systemowe
+                  Eksportuj wbudowane kategorie systemowe ({Object.values(CATEGORIES).length} kategorii)
                 </p>
                 <button
                   onClick={handleExportStatic}
@@ -239,15 +299,24 @@ export default function CategoryImportExportPage() {
               <div className="p-4 bg-green-50 rounded-lg">
                 <h3 className="font-medium text-green-900 mb-2">Kopiuj do Firebase</h3>
                 <p className="text-green-700 text-sm mb-3">
-                  Skopiuj wszystkie statyczne kategorie do Firebase
+                  Skopiuj wszystkie {Object.values(CATEGORIES).length} statycznych kategorii do Firebase
                 </p>
                 <button
                   onClick={copyStaticCategoriesToFirebase}
-                  disabled={isImporting}
-                  className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200 flex items-center space-x-2"
+                  disabled={isCopying}
+                  className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Copy className="h-4 w-4" />
-                  <span>Kopiuj do Firebase</span>
+                  {isCopying ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>Kopiowanie...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      <span>Kopiuj do Firebase</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -291,7 +360,7 @@ export default function CategoryImportExportPage() {
               <button
                 onClick={handleImport}
                 disabled={!selectedFile || isImporting}
-                className="w-full btn-primary flex items-center justify-center space-x-2"
+                className="w-full btn-primary flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isImporting ? (
                   <>
@@ -321,22 +390,29 @@ export default function CategoryImportExportPage() {
                         <h4 className={`font-medium ${
                           importResults.errors.length === 0 ? 'text-green-900' : 'text-yellow-900'
                         }`}>
-                          Wyniki importu
+                          Wyniki {importResults === importResults && importResults.success > 0 ? (isCopying ? 'kopiowania' : 'importu') : 'operacji'}
                         </h4>
                         <p className={`text-sm mt-1 ${
                           importResults.errors.length === 0 ? 'text-green-700' : 'text-yellow-700'
                         }`}>
-                          Pomyślnie zaimportowano: <strong>{importResults.success}</strong> kategorii
+                          Pomyślnie przetworzono: <strong>{importResults.success}</strong> kategorii
                         </p>
                         
                         {importResults.errors.length > 0 && (
                           <div className="mt-2">
-                            <p className="text-yellow-700 text-sm font-medium">Błędy:</p>
-                            <ul className="text-yellow-600 text-xs mt-1 space-y-1">
-                              {importResults.errors.map((error, index) => (
-                                <li key={index}>• {error}</li>
-                              ))}
-                            </ul>
+                            <p className="text-yellow-700 text-sm font-medium">Błędy ({importResults.errors.length}):</p>
+                            <div className="max-h-32 overflow-y-auto mt-1">
+                              <ul className="text-yellow-600 text-xs space-y-1">
+                                {importResults.errors.slice(0, 5).map((error, index) => (
+                                  <li key={index}>• {error}</li>
+                                ))}
+                                {importResults.errors.length > 5 && (
+                                  <li className="text-yellow-500 italic">
+                                    ... i {importResults.errors.length - 5} więcej błędów
+                                  </li>
+                                )}
+                              </ul>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -386,6 +462,21 @@ export default function CategoryImportExportPage() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }

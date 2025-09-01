@@ -9,46 +9,27 @@ import { AuthService } from '@/lib/auth'
 import { ProductService } from '@/lib/products'
 import { getCategoryById } from '@/lib/categories'
 import { Product } from '@/lib/firestore-types'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { 
   ArrowLeft,
   Plus,
   Search,
   Filter,
+  MoreVertical,
   Edit,
   Eye,
   Trash2,
   Package,
   Star,
+  ShoppingCart,
   AlertTriangle,
   CheckCircle,
   XCircle,
   Grid3X3,
-  List,
-  Info,
-  HelpCircle
+  List
 } from 'lucide-react'
-
-// Komponent Tooltip
-const Tooltip = ({ children, text }: { children: React.ReactNode; text: string }) => {
-  const [showTooltip, setShowTooltip] = useState(false)
-
-  return (
-    <div className="relative inline-block">
-      <div
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-      >
-        {children}
-      </div>
-      {showTooltip && (
-        <div className="absolute z-10 px-3 py-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg whitespace-nowrap -top-10 left-1/2 transform -translate-x-1/2">
-          {text}
-          <div className="absolute w-2 h-2 bg-gray-900 transform rotate-45 -bottom-1 left-1/2 -translate-x-1/2"></div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 const sortOptions = [
   { value: 'newest', label: 'Najnowsze' },
@@ -73,8 +54,10 @@ export default function AdminProductsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table')
   const [showFilters, setShowFilters] = useState(false)
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
-  const [showStatusLegend, setShowStatusLegend] = useState(false)
+  const [isBulkActionLoading, setIsBulkActionLoading] = useState(false)
   const router = useRouter()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   // Auth check
   useEffect(() => {
@@ -108,11 +91,12 @@ export default function AdminProductsPage() {
         setFilteredProducts(productsData)
       } catch (error) {
         console.error('Error loading products:', error)
+        showError('Błąd ładowania', 'Nie udało się załadować listy produktów')
       }
     }
 
     loadProducts()
-  }, [isAdmin])
+  }, [isAdmin, showError])
 
   // Filter and sort products
   useEffect(() => {
@@ -194,58 +178,143 @@ export default function AdminProductsPage() {
   }, [products, searchQuery, selectedCategory, selectedStatus, sortBy])
 
   const handleDeleteProduct = async (productId: string, productName: string) => {
-    if (!confirm(`Czy na pewno chcesz usunąć produkt "${productName}"?`)) return
+    const confirmed = await confirm({
+      title: 'Usuń produkt',
+      message: `Czy na pewno chcesz usunąć produkt "${productName}"? Ta akcja jest nieodwracalna i usunie również wszystkie zdjęcia produktu.`,
+      confirmText: 'Usuń produkt',
+      cancelText: 'Anuluj',
+      type: 'danger'
+    })
+
+    if (!confirmed) return
 
     try {
       await ProductService.deleteProduct(productId)
       setProducts(prev => prev.filter(p => p.id !== productId))
-      alert('Produkt został usunięty')
+      showSuccess('Produkt usunięty', `Produkt "${productName}" został pomyślnie usunięty ze sklepu`)
     } catch (error) {
       console.error('Error deleting product:', error)
-      alert('Nie udało się usunąć produktu')
+      showError('Błąd usuwania', `Nie udało się usunąć produktu "${productName}". Spróbuj ponownie.`)
     }
   }
 
   const handleBulkAction = async (action: string) => {
     if (selectedProducts.length === 0) {
-      alert('Wybierz produkty do wykonania akcji')
+      showWarning('Brak wyboru', 'Wybierz produkty aby wykonać akcję masową')
       return
     }
 
-    const confirmed = confirm(`Czy na pewno chcesz wykonać akcję "${action}" na ${selectedProducts.length} produktach?`)
+    const productNames = selectedProducts.map(id => {
+      const product = products.find(p => p.id === id)
+      return product?.name || id
+    }).slice(0, 3) // Pokaż maksymalnie 3 nazwy
+
+    const displayNames = productNames.length === selectedProducts.length 
+      ? productNames.join(', ') 
+      : `${productNames.join(', ')} i ${selectedProducts.length - productNames.length} innych`
+
+    let confirmTitle = ''
+    let confirmMessage = ''
+    let confirmType: 'danger' | 'warning' | 'info' = 'warning'
+
+    switch (action) {
+      case 'delete':
+        confirmTitle = 'Usuń wybrane produkty'
+        confirmMessage = `Czy na pewno chcesz usunąć ${selectedProducts.length} produktów (${displayNames})? Ta akcja jest nieodwracalna i usunie również wszystkie zdjęcia produktów.`
+        confirmType = 'danger'
+        break
+      case 'feature':
+        confirmTitle = 'Oznacz jako polecane'
+        confirmMessage = `Czy na pewno chcesz oznaczyć ${selectedProducts.length} produktów jako polecane (${displayNames})?`
+        confirmType = 'info'
+        break
+      case 'unfeature':
+        confirmTitle = 'Usuń z polecanych'
+        confirmMessage = `Czy na pewno chcesz usunąć ${selectedProducts.length} produktów z polecanych (${displayNames})?`
+        confirmType = 'info'
+        break
+      default:
+        showError('Nieznana akcja', 'Wybrana akcja nie jest obsługiwana')
+        return
+    }
+
+    const confirmed = await confirm({
+      title: confirmTitle,
+      message: confirmMessage,
+      confirmText: action === 'delete' ? 'Usuń produkty' : 'Wykonaj akcję',
+      cancelText: 'Anuluj',
+      type: confirmType
+    })
+
     if (!confirmed) return
 
+    setIsBulkActionLoading(true)
+
     try {
-      switch (action) {
-        case 'delete':
-          for (const productId of selectedProducts) {
-            await ProductService.deleteProduct(productId)
+      let successCount = 0
+      const errors: string[] = []
+
+      for (const productId of selectedProducts) {
+        try {
+          switch (action) {
+            case 'delete':
+              await ProductService.deleteProduct(productId)
+              break
+            case 'feature':
+              await ProductService.updateProduct(productId, { featured: true })
+              break
+            case 'unfeature':
+              await ProductService.updateProduct(productId, { featured: false })
+              break
           }
-          setProducts(prev => prev.filter(p => !selectedProducts.includes(p.id)))
-          break
-        case 'feature':
-          for (const productId of selectedProducts) {
-            await ProductService.updateProduct(productId, { featured: true })
-          }
-          setProducts(prev => prev.map(p => 
-            selectedProducts.includes(p.id) ? { ...p, featured: true } : p
-          ))
-          break
-        case 'unfeature':
-          for (const productId of selectedProducts) {
-            await ProductService.updateProduct(productId, { featured: false })
-          }
-          setProducts(prev => prev.map(p => 
-            selectedProducts.includes(p.id) ? { ...p, featured: false } : p
-          ))
-          break
+          successCount++
+        } catch (error: any) {
+          const productName = products.find(p => p.id === productId)?.name || productId
+          errors.push(`${productName}: ${error.message || 'Nieznany błąd'}`)
+        }
       }
-      
+
+      // Aktualizuj stan produktów
+      if (action === 'delete') {
+        setProducts(prev => prev.filter(p => !selectedProducts.includes(p.id)))
+      } else {
+        setProducts(prev => prev.map(p => 
+          selectedProducts.includes(p.id) 
+            ? { ...p, featured: action === 'feature' }
+            : p
+        ))
+      }
+
       setSelectedProducts([])
-      alert('Akcja została wykonana pomyślnie')
+
+      // Pokaż wyniki
+      if (errors.length === 0) {
+        let successMessage = ''
+        switch (action) {
+          case 'delete':
+            successMessage = `Pomyślnie usunięto ${successCount} produktów`
+            break
+          case 'feature':
+            successMessage = `Pomyślnie oznaczono ${successCount} produktów jako polecane`
+            break
+          case 'unfeature':
+            successMessage = `Pomyślnie usunięto ${successCount} produktów z polecanych`
+            break
+        }
+        showSuccess('Akcja wykonana!', successMessage)
+      } else if (successCount > 0) {
+        showWarning(
+          'Akcja częściowo wykonana', 
+          `Pomyślnie przetworzono ${successCount} produktów. Błędy: ${errors.length}`
+        )
+      } else {
+        showError('Akcja nie powiodła się', `Wszystkie produkty zakończyły się błędem. Pierwsze błędy: ${errors.slice(0, 2).join('; ')}`)
+      }
     } catch (error) {
       console.error('Bulk action error:', error)
-      alert('Nie udało się wykonać akcji')
+      showError('Błąd akcji masowej', 'Nie udało się wykonać akcji masowej. Spróbuj ponownie.')
+    } finally {
+      setIsBulkActionLoading(false)
     }
   }
 
@@ -300,14 +369,6 @@ export default function AdminProductsPage() {
             </div>
           </div>
           <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setShowStatusLegend(!showStatusLegend)}
-              className="btn-outline flex items-center space-x-2"
-              title="Legenda statusów"
-            >
-              <HelpCircle className="h-4 w-4" />
-              <span className="hidden sm:inline">Legenda</span>
-            </button>
             <Link
               href="/admin/categories"
               className="btn-outline flex items-center space-x-2"
@@ -324,34 +385,6 @@ export default function AdminProductsPage() {
             </Link>
           </div>
         </div>
-
-        {/* Status Legend */}
-        {showStatusLegend && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-            <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-              <Info className="h-4 w-4 mr-2" />
-              Legenda statusów produktów
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="flex items-center space-x-2">
-                <Star className="h-4 w-4 text-yellow-500" />
-                <span className="text-sm text-gray-700">Produkt polecany (promowany na stronie głównej)</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="h-4 w-4 text-green-500" />
-                <span className="text-sm text-gray-700">Produkt dostępny w magazynie</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <XCircle className="h-4 w-4 text-red-500" />
-                <span className="text-sm text-gray-700">Brak produktu w magazynie</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <AlertTriangle className="h-4 w-4 text-orange-500" />
-                <span className="text-sm text-gray-700">Niski stan magazynowy (poniżej 5 sztuk)</span>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -475,21 +508,24 @@ export default function AdminProductsPage() {
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => handleBulkAction('feature')}
-                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                  disabled={isBulkActionLoading}
+                  className="text-blue-600 hover:text-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Oznacz jako polecane
+                  {isBulkActionLoading ? 'Przetwarzanie...' : 'Oznacz jako polecane'}
                 </button>
                 <button
                   onClick={() => handleBulkAction('unfeature')}
-                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                  disabled={isBulkActionLoading}
+                  className="text-blue-600 hover:text-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Usuń z polecanych
+                  {isBulkActionLoading ? 'Przetwarzanie...' : 'Usuń z polecanych'}
                 </button>
                 <button
                   onClick={() => handleBulkAction('delete')}
-                  className="text-red-600 hover:text-red-700 text-sm font-medium"
+                  disabled={isBulkActionLoading}
+                  className="text-red-600 hover:text-red-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Usuń wybrane
+                  {isBulkActionLoading ? 'Usuwanie...' : 'Usuń wybrane'}
                 </button>
               </div>
             </div>
@@ -584,13 +620,9 @@ export default function AdminProductsPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         {product.inStock ? (
-                          <Tooltip text="Produkt dostępny">
-                            <CheckCircle className="h-4 w-4 text-green-500 mr-1 cursor-help" />
-                          </Tooltip>
+                          <CheckCircle className="h-4 w-4 text-green-500 mr-1" />
                         ) : (
-                          <Tooltip text="Brak w magazynie">
-                            <XCircle className="h-4 w-4 text-red-500 mr-1 cursor-help" />
-                          </Tooltip>
+                          <XCircle className="h-4 w-4 text-red-500 mr-1" />
                         )}
                         <span className="text-sm text-gray-900">
                           {product.stockQuantity} szt.
@@ -600,19 +632,13 @@ export default function AdminProductsPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
                         {product.featured && (
-                          <Tooltip text="Produkt polecany">
-                            <Star className="h-4 w-4 text-yellow-500 cursor-help" />
-                          </Tooltip>
+                          <Star className="h-4 w-4 text-yellow-500" />
                         )}
                         {!product.inStock && (
-                          <Tooltip text="Produkt niedostępny">
-                            <AlertTriangle className="h-4 w-4 text-red-500 cursor-help" />
-                          </Tooltip>
+                          <AlertTriangle className="h-4 w-4 text-red-500" />
                         )}
                         {product.inStock && product.stockQuantity < 5 && (
-                          <Tooltip text="Niski stan magazynowy">
-                            <AlertTriangle className="h-4 w-4 text-orange-500 cursor-help" />
-                          </Tooltip>
+                          <AlertTriangle className="h-4 w-4 text-orange-500" />
                         )}
                       </div>
                     </td>
@@ -702,11 +728,6 @@ export default function AdminProductsPage() {
                         Brak
                       </span>
                     )}
-                    {product.inStock && product.stockQuantity < 5 && (
-                      <span className="bg-orange-500 text-white px-2 py-1 rounded text-xs">
-                        Niski stan
-                      </span>
-                    )}
                   </div>
                 </div>
 
@@ -751,9 +772,42 @@ export default function AdminProductsPage() {
                 </div>
               </div>
             ))}
+            
+            {filteredProducts.length === 0 && (
+              <div className="col-span-full text-center py-12">
+                <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Brak produktów
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  {searchQuery || selectedCategory !== 'wszystkie' || selectedStatus !== 'wszystkie'
+                    ? 'Nie znaleziono produktów spełniających kryteria wyszukiwania'
+                    : 'Zacznij od dodania pierwszego produktu'
+                  }
+                </p>
+                <Link href="/admin/products/add" className="btn-primary">
+                  Dodaj pierwszy produkt
+                </Link>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }

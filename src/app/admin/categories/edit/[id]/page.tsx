@@ -9,6 +9,9 @@ import { AuthService } from '@/lib/auth'
 import CategoryForm from '@/components/CategoryForm'
 import { getCategoryById, CategoryInfo } from '@/lib/categories'
 import { CategoryService } from '@/lib/category-service'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { ArrowLeft, Edit, Trash2, AlertTriangle } from 'lucide-react'
 
 export default function EditCategoryPage() {
@@ -19,8 +22,10 @@ export default function EditCategoryPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [category, setCategory] = useState<CategoryInfo | null>(null)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const router = useRouter()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   // Load category data
   useEffect(() => {
@@ -43,6 +48,7 @@ export default function EditCategoryPage() {
         }
         
         if (!categoryData) {
+          showError('Kategoria nie znaleziona', 'Nie można znaleźć kategorii o podanym ID. Możliwe, że została usunięta.')
           router.push('/admin/categories?error=not-found')
           return
         }
@@ -50,12 +56,13 @@ export default function EditCategoryPage() {
         setCategory(categoryData)
       } catch (error) {
         console.error('Error loading category:', error)
+        showError('Błąd ładowania', 'Nie udało się załadować danych kategorii. Sprawdź połączenie i spróbuj ponownie.')
         router.push('/admin/categories?error=load-failed')
       }
     }
 
     loadCategory()
-  }, [id, router])
+  }, [id, router, showError])
 
   // Auth check
   useEffect(() => {
@@ -86,7 +93,15 @@ export default function EditCategoryPage() {
       // Waliduj dane
       const validation = CategoryService.validateCategoryData(categoryData)
       if (!validation.isValid) {
-        alert('Błędy walidacji:\n' + validation.errors.join('\n'))
+        const errorMessage = validation.errors.length === 1 
+          ? validation.errors[0]
+          : `Znaleziono ${validation.errors.length} błędów walidacji`
+        
+        const detailMessage = validation.errors.length === 1 
+          ? undefined
+          : validation.errors.join(' • ')
+
+        showError('Błędy walidacji', detailMessage || errorMessage)
         return
       }
 
@@ -94,33 +109,78 @@ export default function EditCategoryPage() {
       await CategoryService.updateCategory(id, categoryData)
       console.log('Category updated:', id)
       
-      // Po zapisaniu przekieruj do listy kategorii
-      router.push('/admin/categories?success=updated&id=' + id)
+      showSuccess(
+        'Kategoria zaktualizowana!',
+        `Kategoria "${categoryData.name}" została pomyślnie zaktualizowana i zmiany są widoczne w całym systemie.`
+      )
+      
+      // Po zapisaniu przekieruj do listy kategorii z opóźnieniem
+      setTimeout(() => {
+        router.push('/admin/categories?success=updated&id=' + id)
+      }, 1500)
     } catch (error: any) {
       console.error('Error updating category:', error)
-      alert(error.message || 'Nie udało się zaktualizować kategorii')
+      showError(
+        'Błąd podczas aktualizacji',
+        error.message || 'Nie udało się zaktualizować kategorii. Sprawdź dane i spróbuj ponownie.'
+      )
     } finally {
       setIsSaving(false)
     }
   }
 
   const handleDelete = async () => {
-    if (!id) return
+    if (!id || !category) return
+    
+    const confirmed = await confirm({
+      title: 'Usuń kategorię',
+      message: `Czy na pewno chcesz usunąć kategorię "${category.name}"? Ta akcja jest nieodwracalna i może wpłynąć na produkty używające tej kategorii.`,
+      confirmText: 'Usuń kategorię',
+      cancelText: 'Anuluj',
+      type: 'danger'
+    })
+
+    if (!confirmed) return
+
+    setIsDeleting(true)
     
     try {
       // Usuń kategorię z Firebase
       await CategoryService.deleteCategory(id)
       console.log('Category deleted:', id)
       
-      router.push('/admin/categories?success=deleted&id=' + id)
+      showSuccess(
+        'Kategoria usunięta!',
+        `Kategoria "${category.name}" została pomyślnie usunięta z systemu.`
+      )
+      
+      // Przekieruj po krótkim opóźnieniu
+      setTimeout(() => {
+        router.push('/admin/categories?success=deleted&id=' + id)
+      }, 1500)
     } catch (error: any) {
       console.error('Error deleting category:', error)
-      alert(error.message || 'Nie udało się usunąć kategorii')
+      showError(
+        'Błąd podczas usuwania',
+        error.message || 'Nie udało się usunąć kategorii. Upewnij się, że żadne produkty nie używają tej kategorii.'
+      )
+    } finally {
+      setIsDeleting(false)
     }
   }
 
-  const handleCancel = () => {
-    router.push('/admin/categories')
+  const handleCancel = async () => {
+    const confirmed = await confirm({
+      title: 'Odrzucić zmiany?',
+      message: 'Czy na pewno chcesz opuścić tę stronę? Wszystkie niezapisane zmiany zostaną utracone.',
+      confirmText: 'Tak, odrzuć',
+      cancelText: 'Zostań tutaj', 
+      type: 'warning'
+    })
+
+    if (confirmed) {
+      router.push('/admin/categories')
+    }
   }
 
   // Loading states
@@ -169,11 +229,21 @@ export default function EditCategoryPage() {
           </div>
           <div className="flex items-center space-x-3">
             <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="btn-outline text-red-600 border-red-300 hover:bg-red-50 flex items-center space-x-2"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="btn-outline text-red-600 border-red-300 hover:bg-red-50 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Trash2 className="h-4 w-4" />
-              <span>Usuń kategorię</span>
+              {isDeleting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Usuwanie...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  <span>Usuń kategorię</span>
+                </>
+              )}
             </button>
             <Link
               href="/admin/categories"
@@ -208,55 +278,22 @@ export default function EditCategoryPage() {
           onCancel={handleCancel}
           isLoading={isSaving}
         />
-
-        {/* Delete confirmation modal */}
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full p-6">
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <AlertTriangle className="h-5 w-5 text-red-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    Usuń kategorię
-                  </h3>
-                </div>
-              </div>
-              
-              <p className="text-gray-600 mb-6">
-                Czy na pewno chcesz usunąć kategorię <strong>"{category.name}"</strong>? 
-                Ta akcja jest nieodwracalna.
-              </p>
-              
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
-                <p className="text-red-700 text-sm">
-                  <strong>Ostrzeżenie:</strong> Upewnij się, że żadne produkty nie używają tej kategorii.
-                  W przeciwnym razie produkty mogą zostać uszkodzone.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end space-x-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="btn-outline"
-                >
-                  Anuluj
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDeleteConfirm(false)
-                    handleDelete()
-                  }}
-                  className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200"
-                >
-                  Usuń kategorię
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }

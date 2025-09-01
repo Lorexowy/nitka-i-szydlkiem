@@ -8,6 +8,9 @@ import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { CategoryService } from '@/lib/category-service'
 import CategoryForm from '@/components/CategoryForm'
+import { useToast } from '@/contexts/ToastContext'
+import { useConfirmation } from '@/hooks/useConfirmation'
+import ConfirmationModal from '@/components/ConfirmationModal'
 import { ArrowLeft, Plus } from 'lucide-react'
 
 export default function AddCategoryPage() {
@@ -15,6 +18,8 @@ export default function AddCategoryPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const router = useRouter()
+  const { showSuccess, showError, showWarning, showInfo } = useToast()
+  const { confirmation, confirm, closeConfirmation } = useConfirmation()
 
   // Auth check
   useEffect(() => {
@@ -43,7 +48,15 @@ export default function AddCategoryPage() {
       // Waliduj dane
       const validation = CategoryService.validateCategoryData(categoryData)
       if (!validation.isValid) {
-        alert('Błędy walidacji:\n' + validation.errors.join('\n'))
+        const errorMessage = validation.errors.length === 1 
+          ? validation.errors[0]
+          : `Znaleziono ${validation.errors.length} błędów walidacji`
+        
+        const detailMessage = validation.errors.length === 1 
+          ? undefined
+          : validation.errors.join(' • ')
+
+        showError('Błędy walidacji', detailMessage || errorMessage)
         return
       }
 
@@ -51,18 +64,38 @@ export default function AddCategoryPage() {
       const categoryId = await CategoryService.createCategory(categoryData)
       console.log('New category created:', categoryId)
       
-      // Po zapisaniu przekieruj do listy kategorii
-      router.push('/admin/categories?success=created&id=' + categoryId)
+      showSuccess(
+        'Kategoria utworzona!',
+        `Kategoria "${categoryData.name}" została pomyślnie dodana do systemu i jest dostępna dla produktów.`
+      )
+      
+      // Po zapisaniu przekieruj do listy kategorii z opóźnieniem
+      setTimeout(() => {
+        router.push('/admin/categories?success=created&id=' + categoryId)
+      }, 1500)
     } catch (error: any) {
       console.error('Error saving category:', error)
-      alert(error.message || 'Nie udało się utworzyć kategorii')
+      showError(
+        'Błąd podczas tworzenia kategorii',
+        error.message || 'Nie udało się utworzyć kategorii. Sprawdź dane i spróbuj ponownie.'
+      )
     } finally {
       setIsSaving(false)
     }
   }
 
-  const handleCancel = () => {
-    router.push('/admin/categories')
+  const handleCancel = async () => {
+    const confirmed = await confirm({
+      title: 'Opuścić bez zapisywania?',
+      message: 'Czy na pewno chcesz opuścić tę stronę? Wszystkie wprowadzone dane zostaną utracone.',
+      confirmText: 'Tak, opuść',
+      cancelText: 'Zostań tutaj',
+      type: 'warning'
+    })
+
+    if (confirmed) {
+      router.push('/admin/categories')
+    }
   }
 
   if (isLoading) {
@@ -123,6 +156,21 @@ export default function AddCategoryPage() {
           isLoading={isSaving}
         />
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmation && (
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={confirmation.onCancel}
+          onConfirm={confirmation.onConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
+        />
+      )}
     </div>
   )
 }
