@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { User } from '@/lib/firestore-types'
-import { useCartCount } from '@/contexts/CartContext' // DODANY IMPORT
+import { useCartCount } from '@/contexts/CartContext'
 import { 
   Menu, 
   X, 
@@ -22,7 +22,8 @@ import {
   UserCheck,
   Settings,
   Package,
-  ChevronDown
+  ChevronDown,
+  Shield
 } from 'lucide-react'
 
 export default function Header() {
@@ -33,7 +34,7 @@ export default function Header() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
-  const cartCount = useCartCount() // DODANA LINIA
+  const cartCount = useCartCount()
 
   // Check auth state
   useEffect(() => {
@@ -85,12 +86,28 @@ export default function Header() {
     { href: '/kontakt', label: 'Kontakt' },
   ]
 
-  const userMenuItems = [
-    { href: '/konto', label: 'Moje konto', icon: <UserIcon className="h-4 w-4" /> },
-    { href: '/konto?tab=orders', label: 'Zamówienia', icon: <Package className="h-4 w-4" /> },
-    { href: '/konto?tab=wishlist', label: 'Lista życzeń', icon: <Heart className="h-4 w-4" /> },
-    { href: '/konto?tab=settings', label: 'Ustawienia', icon: <Settings className="h-4 w-4" /> },
-  ]
+  // Różne menu dla adminów i zwykłych użytkowników
+  const getUserMenuItems = () => {
+    if (user?.role === 'admin') {
+      return [
+        { 
+          href: '/admin/dashboard', 
+          label: 'Panel administratora', 
+          icon: <Shield className="h-4 w-4" /> 
+        }
+      ]
+    }
+
+    // Menu dla zwykłych użytkowników
+    return [
+      { href: '/konto', label: 'Moje konto', icon: <UserIcon className="h-4 w-4" /> },
+      { href: '/konto?tab=orders', label: 'Zamówienia', icon: <Package className="h-4 w-4" /> },
+      { href: '/konto?tab=wishlist', label: 'Lista życzeń', icon: <Heart className="h-4 w-4" /> },
+      { href: '/konto?tab=settings', label: 'Ustawienia', icon: <Settings className="h-4 w-4" /> },
+    ]
+  }
+
+  const userMenuItems = getUserMenuItems()
 
   return (
     <header className="bg-white shadow-md sticky top-0 z-50">
@@ -164,31 +181,35 @@ export default function Header() {
               <Search className="h-5 w-5 text-gray-600" />
             </button>
 
-            {/* Wishlist */}
-            <Link
-              href={user ? "/konto?tab=wishlist" : "/logowanie?redirect=/konto?tab=wishlist"}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 relative"
-              aria-label="Wishlist"
-            >
-              <Heart className="h-5 w-5 text-gray-600" />
-              <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                0
-              </span>
-            </Link>
-
-            {/* Cart */}
-            <Link
-              href="/koszyk"
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 relative"
-              aria-label="Shopping cart"
-            >
-              <ShoppingCart className="h-5 w-5 text-gray-600" />
-              {cartCount > 0 && (
+            {/* Wishlist - ukryte dla adminów */}
+            {user?.role !== 'admin' && (
+              <Link
+                href={user ? "/konto?tab=wishlist" : "/logowanie?redirect=/konto?tab=wishlist"}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 relative"
+                aria-label="Wishlist"
+              >
+                <Heart className="h-5 w-5 text-gray-600" />
                 <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                  {cartCount > 99 ? '99+' : cartCount}
+                  0
                 </span>
-              )}
-            </Link>
+              </Link>
+            )}
+
+            {/* Cart - ukryte dla adminów */}
+            {user?.role !== 'admin' && (
+              <Link
+                href="/koszyk"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 relative"
+                aria-label="Shopping cart"
+              >
+                <ShoppingCart className="h-5 w-5 text-gray-600" />
+                {cartCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                    {cartCount > 99 ? '99+' : cartCount}
+                  </span>
+                )}
+              </Link>
+            )}
 
             {/* User menu */}
             {!isLoading && (
@@ -199,11 +220,22 @@ export default function Header() {
                       onClick={toggleUserMenu}
                       className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
                     >
-                      <div className="w-6 h-6 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full flex items-center justify-center">
-                        <UserIcon className="h-3 w-3 text-white" />
+                      <div className={`w-6 h-6 ${
+                        user.role === 'admin' 
+                          ? 'bg-gradient-to-br from-blue-500 to-purple-600' 
+                          : 'bg-gradient-to-br from-pink-400 to-purple-500'
+                      } rounded-full flex items-center justify-center`}>
+                        {user.role === 'admin' ? (
+                          <Shield className="h-3 w-3 text-white" />
+                        ) : (
+                          <UserIcon className="h-3 w-3 text-white" />
+                        )}
                       </div>
                       <span className="hidden md:block text-sm font-medium text-gray-700">
-                        {user.displayName?.split(' ')[0] || 'Konto'}
+                        {user.role === 'admin' 
+                          ? 'Admin' 
+                          : (user.displayName?.split(' ')[0] || 'Konto')
+                        }
                       </span>
                       <ChevronDown className="h-4 w-4 text-gray-400" />
                     </button>
@@ -220,6 +252,11 @@ export default function Header() {
                           <div className="px-4 py-3 border-b border-gray-200">
                             <p className="text-sm font-medium text-gray-900">
                               {user.displayName || 'Użytkownik'}
+                              {user.role === 'admin' && (
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  Admin
+                                </span>
+                              )}
                             </p>
                             <p className="text-sm text-gray-600 truncate">
                               {user.email}
@@ -356,6 +393,20 @@ export default function Header() {
                   >
                     <UserCheck className="h-4 w-4" />
                     <span>Załóż konto</span>
+                  </Link>
+                </div>
+              )}
+
+              {/* Admin panel link for mobile */}
+              {user && user.role === 'admin' && (
+                <div className="border-t border-gray-200 pt-4 mt-4">
+                  <Link
+                    href="/admin/dashboard"
+                    className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium py-2"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    <Shield className="h-4 w-4" />
+                    <span>Panel administratora</span>
                   </Link>
                 </div>
               )}
