@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
 import { User } from '@/lib/firestore-types'
-import { useCartCount } from '@/contexts/CartContext' // DODANY IMPORT
+import { useCartCount } from '@/contexts/CartContext'
 import { 
   Menu, 
   X, 
@@ -25,7 +25,7 @@ import {
   ChevronDown
 } from 'lucide-react'
 
-export default function Header() {
+export default function ClientHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
@@ -33,7 +33,7 @@ export default function Header() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const router = useRouter()
-  const cartCount = useCartCount() // DODANA LINIA
+  const cartCount = useCartCount()
 
   // Check auth state
   useEffect(() => {

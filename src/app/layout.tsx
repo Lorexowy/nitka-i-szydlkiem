@@ -4,6 +4,7 @@ import './globals.css'
 import Header from '@/components/Header'
 import Footer from '@/components/Footer'
 import { ToastProvider } from '@/contexts/ToastContext'
+import { CartProvider } from '@/contexts/CartContext'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -43,13 +44,15 @@ export default function RootLayout({
   return (
     <html lang="pl" className="h-full">
       <body className={`${inter.className} min-h-full flex flex-col bg-gray-50`}>
-        <Header />
-        <main className="flex-1">
-          <ToastProvider>
-          {children}
-          </ToastProvider>
-        </main>
-        <Footer />
+        <ToastProvider>
+          <CartProvider>
+            <Header />
+            <main className="flex-1">
+              {children}
+            </main>
+            <Footer />
+          </CartProvider>
+        </ToastProvider>
       </body>
     </html>
   )
