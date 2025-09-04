@@ -6,7 +6,9 @@ import Link from 'next/link'
 import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import { AuthService } from '@/lib/auth'
-import { User } from '@/lib/firestore-types'
+import { User, UserProfile, Address } from '@/lib/firestore-types'
+import { useToast } from '@/contexts/ToastContext'
+import AddressManager from '@/components/AddressManager'
 import { 
   User as UserIcon, 
   Settings, 
@@ -21,14 +23,42 @@ import {
   ChevronRight,
   Bell,
   CreditCard,
-  Truck
+  Truck,
+  Save,
+  Phone,
+  Cake,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react'
 
 export default function UserAccountPage() {
   const [user, setUser] = useState<User | null>(null)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [addresses, setAddresses] = useState<Address[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
+  const [isSaving, setIsSaving] = useState(false)
+  
+  // Form states
+  const [profileFormData, setProfileFormData] = useState({
+    firstName: '',
+    lastName: '',
+    phone: '',
+    dateOfBirth: '',
+    gender: '' as 'male' | 'female' | 'other' | 'prefer_not_to_say' | ''
+  })
+  
+  const [preferencesFormData, setPreferencesFormData] = useState({
+    newsletter: false,
+    smsNotifications: false,
+    emailNotifications: true,
+    orderNotifications: true,
+    marketingEmails: false
+  })
+
+  const [profileFormErrors, setProfileFormErrors] = useState<Record<string, string>>({})
   const router = useRouter()
+  const { showSuccess, showError } = useToast()
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -50,8 +80,34 @@ export default function UserAccountPage() {
         }
 
         setUser(userData)
+
+        // Pobierz profil użytkownika
+        const profileData = await AuthService.getUserProfile(firebaseUser.uid)
+        if (profileData) {
+          setUserProfile(profileData)
+          setProfileFormData({
+            firstName: profileData.firstName || '',
+            lastName: profileData.lastName || '',
+            phone: profileData.phone || '',
+            dateOfBirth: profileData.dateOfBirth || '',
+            gender: profileData.gender || ''
+          })
+          setPreferencesFormData({
+            newsletter: profileData.preferences.newsletter,
+            smsNotifications: profileData.preferences.smsNotifications,
+            emailNotifications: profileData.preferences.emailNotifications,
+            orderNotifications: profileData.preferences.orderNotifications ?? true,
+            marketingEmails: profileData.preferences.marketingEmails ?? false
+          })
+        }
+
+        // Pobierz adresy
+        const userAddresses = await AuthService.getUserAddresses(firebaseUser.uid)
+        setAddresses(userAddresses)
+
       } catch (error) {
         console.error('Error loading user data:', error)
+        showError('Błąd', 'Nie udało się wczytać danych użytkownika')
         router.push('/logowanie')
       } finally {
         setIsLoading(false)
@@ -59,7 +115,7 @@ export default function UserAccountPage() {
     })
 
     return () => unsubscribe()
-  }, [router])
+  }, [router, showError])
 
   const handleLogout = async () => {
     try {
@@ -67,6 +123,97 @@ export default function UserAccountPage() {
       router.push('/')
     } catch (error) {
       console.error('Error logging out:', error)
+      showError('Błąd', 'Nie udało się wylogować')
+    }
+  }
+
+  const validateProfileForm = () => {
+    const errors: Record<string, string> = {}
+
+    if (!profileFormData.firstName.trim()) {
+      errors.firstName = 'Imię jest wymagane'
+    }
+
+    if (!profileFormData.lastName.trim()) {
+      errors.lastName = 'Nazwisko jest wymagane'
+    }
+
+    if (profileFormData.phone && !/^[\+]?[\d\s\-\(\)]{9,}$/.test(profileFormData.phone)) {
+      errors.phone = 'Nieprawidłowy format numeru telefonu'
+    }
+
+    if (profileFormData.dateOfBirth) {
+      const birthDate = new Date(profileFormData.dateOfBirth)
+      const today = new Date()
+      const age = today.getFullYear() - birthDate.getFullYear()
+      
+      if (birthDate > today) {
+        errors.dateOfBirth = 'Data urodzenia nie może być w przyszłości'
+      } else if (age > 150) {
+        errors.dateOfBirth = 'Nieprawidłowa data urodzenia'
+      }
+    }
+
+    setProfileFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!validateProfileForm() || !user) return
+
+    setIsSaving(true)
+    try {
+      const updates = {
+        firstName: profileFormData.firstName.trim(),
+        lastName: profileFormData.lastName.trim(),
+        phone: profileFormData.phone.trim() || undefined,
+        dateOfBirth: profileFormData.dateOfBirth || undefined,
+        gender: profileFormData.gender || undefined
+      }
+
+      await AuthService.updateUserProfile(user.uid, updates)
+      
+      // Odśwież dane
+      const updatedProfile = await AuthService.getUserProfile(user.uid)
+      if (updatedProfile) {
+        setUserProfile(updatedProfile)
+      }
+
+      const updatedUser = await AuthService.getUserData(user.uid)
+      if (updatedUser) {
+        setUser(updatedUser)
+      }
+
+      showSuccess('Sukces', 'Profil został zaktualizowany')
+    } catch (error: any) {
+      console.error('Error updating profile:', error)
+      showError('Błąd', error.message || 'Nie udało się zaktualizować profilu')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSavePreferences = async () => {
+    if (!user) return
+
+    setIsSaving(true)
+    try {
+      await AuthService.updateUserPreferences(user.uid, preferencesFormData)
+      
+      // Odśwież dane profilu
+      const updatedProfile = await AuthService.getUserProfile(user.uid)
+      if (updatedProfile) {
+        setUserProfile(updatedProfile)
+      }
+
+      showSuccess('Sukces', 'Preferencje zostały zaktualizowane')
+    } catch (error: any) {
+      console.error('Error updating preferences:', error)
+      showError('Błąd', error.message || 'Nie udało się zaktualizować preferencji')
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -77,6 +224,16 @@ export default function UserAccountPage() {
       month: 'long',
       day: 'numeric'
     })
+  }
+
+  const getGenderLabel = (gender?: string) => {
+    switch (gender) {
+      case 'male': return 'Mężczyzna'
+      case 'female': return 'Kobieta'
+      case 'other': return 'Inna'
+      case 'prefer_not_to_say': return 'Wolę nie podawać'
+      default: return 'Nie podano'
+    }
   }
 
   if (isLoading) {
@@ -211,7 +368,9 @@ export default function UserAccountPage() {
                       </div>
                       <div className="ml-4">
                         <p className="text-sm font-medium text-gray-600">Zamówienia</p>
-                        <p className="text-2xl font-bold text-gray-900">0</p>
+                        <p className="text-2xl font-bold text-gray-900">
+                          {userProfile?.totalOrders || 0}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -235,7 +394,9 @@ export default function UserAccountPage() {
                       </div>
                       <div className="ml-4">
                         <p className="text-sm font-medium text-gray-600">Wydano</p>
-                        <p className="text-2xl font-bold text-gray-900">0 zł</p>
+                        <p className="text-2xl font-bold text-gray-900">
+                          {(userProfile?.totalSpent || 0).toFixed(2)} zł
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -260,7 +421,12 @@ export default function UserAccountPage() {
                         <UserIcon className="h-5 w-5 text-gray-400 mt-0.5" />
                         <div>
                           <p className="text-sm font-medium text-gray-600">Imię i nazwisko</p>
-                          <p className="text-gray-900">{user.displayName || 'Nie podano'}</p>
+                          <p className="text-gray-900">
+                            {userProfile?.firstName && userProfile?.lastName
+                              ? `${userProfile.firstName} ${userProfile.lastName}`
+                              : user.displayName || 'Nie podano'
+                            }
+                          </p>
                         </div>
                       </div>
 
@@ -271,6 +437,16 @@ export default function UserAccountPage() {
                           <p className="text-gray-900">{user.email}</p>
                         </div>
                       </div>
+
+                      {userProfile?.phone && (
+                        <div className="flex items-start space-x-3">
+                          <Phone className="h-5 w-5 text-gray-400 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-600">Telefon</p>
+                            <p className="text-gray-900">{userProfile.phone}</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-4">
@@ -281,6 +457,18 @@ export default function UserAccountPage() {
                           <p className="text-gray-900">{formatDate(user.createdAt)}</p>
                         </div>
                       </div>
+
+                      {userProfile?.dateOfBirth && (
+                        <div className="flex items-start space-x-3">
+                          <Cake className="h-5 w-5 text-gray-400 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-600">Data urodzenia</p>
+                            <p className="text-gray-900">
+                              {new Date(userProfile.dateOfBirth).toLocaleDateString('pl-PL')}
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex items-start space-x-3">
                         <Shield className="h-5 w-5 text-gray-400 mt-0.5" />
@@ -316,8 +504,10 @@ export default function UserAccountPage() {
                     >
                       <MapPin className="h-6 w-6 text-green-600" />
                       <div>
-                        <h4 className="font-medium text-gray-900">Dodaj adres</h4>
-                        <p className="text-sm text-gray-600">Przyspiesz swoje zamówienia</p>
+                        <h4 className="font-medium text-gray-900">Zarządzaj adresami</h4>
+                        <p className="text-sm text-gray-600">
+                          Masz {addresses.length} {addresses.length === 1 ? 'adres' : 'adresów'}
+                        </p>
                       </div>
                     </button>
                   </div>
@@ -361,23 +551,11 @@ export default function UserAccountPage() {
 
             {activeTab === 'addresses' && (
               <div className="bg-white rounded-lg shadow-md p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Adresy</h3>
-                  <button className="btn-primary text-sm">
-                    Dodaj adres
-                  </button>
-                </div>
-                
-                <div className="text-center py-12">
-                  <MapPin className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h4 className="text-lg font-medium text-gray-900 mb-2">Brak zapisanych adresów</h4>
-                  <p className="text-gray-600 mb-6">
-                    Dodaj adresy do wysyłki i płatności, aby przyspieszyć składanie zamówień
-                  </p>
-                  <button className="btn-primary">
-                    Dodaj pierwszy adres
-                  </button>
-                </div>
+                <AddressManager
+                  userId={user.uid}
+                  initialAddresses={addresses}
+                  onAddressChange={setAddresses}
+                />
               </div>
             )}
 
@@ -387,35 +565,46 @@ export default function UserAccountPage() {
                 <div className="bg-white rounded-lg shadow-md p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-6">Dane osobowe</h3>
                   
-                  <form className="space-y-6">
+                  <form onSubmit={handleSaveProfile} className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
-                        <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-1">
-                          Imię i nazwisko
+                        <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-1">
+                          Imię *
                         </label>
                         <input
                           type="text"
-                          id="displayName"
-                          defaultValue={user.displayName || ''}
-                          className="input-field"
-                          placeholder="Jan Kowalski"
+                          id="firstName"
+                          value={profileFormData.firstName}
+                          onChange={(e) => setProfileFormData({ 
+                            ...profileFormData, 
+                            firstName: e.target.value 
+                          })}
+                          className={`input-field ${profileFormErrors.firstName ? 'border-red-300' : ''}`}
+                          placeholder="Jan"
                         />
+                        {profileFormErrors.firstName && (
+                          <p className="text-red-600 text-sm mt-1">{profileFormErrors.firstName}</p>
+                        )}
                       </div>
 
                       <div>
-                        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                          Email
+                        <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-1">
+                          Nazwisko *
                         </label>
                         <input
-                          type="email"
-                          id="email"
-                          defaultValue={user.email}
-                          className="input-field bg-gray-50"
-                          disabled
+                          type="text"
+                          id="lastName"
+                          value={profileFormData.lastName}
+                          onChange={(e) => setProfileFormData({ 
+                            ...profileFormData, 
+                            lastName: e.target.value 
+                          })}
+                          className={`input-field ${profileFormErrors.lastName ? 'border-red-300' : ''}`}
+                          placeholder="Kowalski"
                         />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Email nie może być zmieniony
-                        </p>
+                        {profileFormErrors.lastName && (
+                          <p className="text-red-600 text-sm mt-1">{profileFormErrors.lastName}</p>
+                        )}
                       </div>
 
                       <div>
@@ -425,9 +614,17 @@ export default function UserAccountPage() {
                         <input
                           type="tel"
                           id="phone"
-                          className="input-field"
+                          value={profileFormData.phone}
+                          onChange={(e) => setProfileFormData({ 
+                            ...profileFormData, 
+                            phone: e.target.value 
+                          })}
+                          className={`input-field ${profileFormErrors.phone ? 'border-red-300' : ''}`}
                           placeholder="+48 123 456 789"
                         />
+                        {profileFormErrors.phone && (
+                          <p className="text-red-600 text-sm mt-1">{profileFormErrors.phone}</p>
+                        )}
                       </div>
 
                       <div>
@@ -437,14 +634,73 @@ export default function UserAccountPage() {
                         <input
                           type="date"
                           id="dateOfBirth"
-                          className="input-field"
+                          value={profileFormData.dateOfBirth}
+                          onChange={(e) => setProfileFormData({ 
+                            ...profileFormData, 
+                            dateOfBirth: e.target.value 
+                          })}
+                          className={`input-field ${profileFormErrors.dateOfBirth ? 'border-red-300' : ''}`}
                         />
+                        {profileFormErrors.dateOfBirth && (
+                          <p className="text-red-600 text-sm mt-1">{profileFormErrors.dateOfBirth}</p>
+                        )}
+                      </div>
+
+                      <div>
+                        <label htmlFor="gender" className="block text-sm font-medium text-gray-700 mb-1">
+                          Płeć
+                        </label>
+                        <select
+                          id="gender"
+                          value={profileFormData.gender}
+                          onChange={(e) => setProfileFormData({ 
+                            ...profileFormData, 
+                            gender: e.target.value as any 
+                          })}
+                          className="input-field"
+                        >
+                          <option value="">Wybierz płeć</option>
+                          <option value="male">Mężczyzna</option>
+                          <option value="female">Kobieta</option>
+                          <option value="other">Inna</option>
+                          <option value="prefer_not_to_say">Wolę nie podawać</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          id="email"
+                          value={user.email}
+                          className="input-field bg-gray-50"
+                          disabled
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Email nie może być zmieniony
+                        </p>
                       </div>
                     </div>
 
                     <div className="flex justify-end">
-                      <button type="submit" className="btn-primary">
-                        Zapisz zmiany
+                      <button 
+                        type="submit" 
+                        disabled={isSaving}
+                        className="btn-primary flex items-center space-x-2"
+                      >
+                        {isSaving ? (
+                          <>
+                            <div className="loading-spinner"></div>
+                            <span>Zapisywanie...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-4 w-4" />
+                            <span>Zapisz zmiany</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </form>
@@ -464,7 +720,15 @@ export default function UserAccountPage() {
                         </div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" defaultChecked />
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={preferencesFormData.newsletter}
+                          onChange={(e) => setPreferencesFormData({
+                            ...preferencesFormData,
+                            newsletter: e.target.checked
+                          })}
+                        />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
                     </div>
@@ -478,7 +742,15 @@ export default function UserAccountPage() {
                         </div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" defaultChecked />
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={preferencesFormData.orderNotifications}
+                          onChange={(e) => setPreferencesFormData({
+                            ...preferencesFormData,
+                            orderNotifications: e.target.checked
+                          })}
+                        />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
                     </div>
@@ -487,15 +759,88 @@ export default function UserAccountPage() {
                       <div className="flex items-center space-x-3">
                         <Mail className="h-5 w-5 text-gray-400" />
                         <div>
+                          <h4 className="font-medium text-gray-900">Powiadomienia email</h4>
+                          <p className="text-sm text-gray-600">Ważne informacje przez email</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={preferencesFormData.emailNotifications}
+                          onChange={(e) => setPreferencesFormData({
+                            ...preferencesFormData,
+                            emailNotifications: e.target.checked
+                          })}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <Phone className="h-5 w-5 text-gray-400" />
+                        <div>
                           <h4 className="font-medium text-gray-900">Powiadomienia SMS</h4>
                           <p className="text-sm text-gray-600">Ważne informacje przez SMS</p>
                         </div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" />
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={preferencesFormData.smsNotifications}
+                          onChange={(e) => setPreferencesFormData({
+                            ...preferencesFormData,
+                            smsNotifications: e.target.checked
+                          })}
+                        />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
                     </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <Mail className="h-5 w-5 text-gray-400" />
+                        <div>
+                          <h4 className="font-medium text-gray-900">Materiały marketingowe</h4>
+                          <p className="text-sm text-gray-600">Promocje, konkursy i oferty specjalne</p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          className="sr-only peer" 
+                          checked={preferencesFormData.marketingEmails}
+                          onChange={(e) => setPreferencesFormData({
+                            ...preferencesFormData,
+                            marketingEmails: e.target.checked
+                          })}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end mt-6">
+                    <button 
+                      type="button"
+                      onClick={handleSavePreferences}
+                      disabled={isSaving}
+                      className="btn-primary flex items-center space-x-2"
+                    >
+                      {isSaving ? (
+                        <>
+                          <div className="loading-spinner"></div>
+                          <span>Zapisywanie...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" />
+                          <span>Zapisz preferencje</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
 
@@ -509,19 +854,63 @@ export default function UserAccountPage() {
                         <h4 className="font-medium text-gray-900">Zmień hasło</h4>
                         <p className="text-sm text-gray-600">Ostatnia zmiana: nigdy</p>
                       </div>
-                      <button className="text-blue-600 hover:text-blue-700 font-medium text-sm">
+                      <Link 
+                        href="/resetowanie-hasla"
+                        className="text-blue-600 hover:text-blue-700 font-medium text-sm"
+                      >
                         Zmień hasło
-                      </button>
+                      </Link>
                     </div>
 
-                    <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                    <div className="flex items-center justify-between p-4 border border-yellow-200 rounded-lg bg-yellow-50">
                       <div>
-                        <h4 className="font-medium text-gray-900">Usuń konto</h4>
+                        <h4 className="font-medium text-gray-900 flex items-center">
+                          <AlertCircle className="h-4 w-4 text-yellow-600 mr-2" />
+                          Usuń konto
+                        </h4>
                         <p className="text-sm text-gray-600">Trwale usuń swoje konto i wszystkie dane</p>
                       </div>
-                      <button className="text-red-600 hover:text-red-700 font-medium text-sm">
+                      <button 
+                        className="text-red-600 hover:text-red-700 font-medium text-sm"
+                        onClick={() => {
+                          // TODO: Implementacja usuwania konta
+                          alert('Ta funkcja będzie dostępna wkrótce')
+                        }}
+                      >
                         Usuń konto
                       </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Account Status */}
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-6">Status konta</h3>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3 p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <CheckCircle className="h-6 w-6 text-green-600" />
+                      <div>
+                        <h4 className="font-medium text-green-900">Konto zweryfikowane</h4>
+                        <p className="text-sm text-green-700">
+                          Twój adres email został potwierdzony
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+                      <div>
+                        <strong>ID konta:</strong> {user.uid.slice(0, 8)}...
+                      </div>
+                      <div>
+                        <strong>Utworzono:</strong> {formatDate(user.createdAt)}
+                      </div>
+                      <div>
+                        <strong>Ostatnia aktualizacja:</strong> {formatDate(user.updatedAt)}
+                      </div>
+                      <div>
+                        <strong>Typ konta:</strong> {user.role === 'customer' ? 'Klient' : 'Administrator'}
+                      </div>
                     </div>
                   </div>
                 </div>
