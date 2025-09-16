@@ -53,16 +53,21 @@ export default function AdminDashboard() {
 
       setIsAdmin(true)
       
-      // Załaduj produkty
+      // Załaduj produkty i statystyki użytkowników
       try {
-        const productsData = await ProductService.getAllProducts()
+        const [productsData, userStats] = await Promise.all([
+          ProductService.getAllProducts(),
+          AuthService.getUserStats()
+        ])
+        
         setProducts(productsData)
         setStats(prev => ({
           ...prev,
-          totalProducts: productsData.length
+          totalProducts: productsData.length,
+          totalUsers: userStats.totalUsers
         }))
       } catch (error) {
-        console.error('Error loading products:', error)
+        console.error('Error loading data:', error)
       }
       
       setIsLoading(false)
@@ -218,11 +223,19 @@ export default function AdminDashboard() {
             </Link>
 
             <Link
-              href="/admin/categories"
+              href="/admin/users"
               className="flex items-center space-x-3 p-4 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
             >
-              <Grid3X3 className="h-6 w-6 text-purple-600" />
-              <span className="font-medium text-purple-900">Kategorie</span>
+              <Users className="h-6 w-6 text-purple-600" />
+              <span className="font-medium text-purple-900">Użytkownicy</span>
+            </Link>
+
+            <Link
+              href="/admin/categories"
+              className="flex items-center space-x-3 p-4 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+            >
+              <Grid3X3 className="h-6 w-6 text-indigo-600" />
+              <span className="font-medium text-indigo-900">Kategorie</span>
             </Link>
 
             <Link
