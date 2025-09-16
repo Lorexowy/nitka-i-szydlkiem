@@ -206,19 +206,6 @@ function LoginContent() {
           </div>
         </div>
 
-        {/* Quick access for admins */}
-        <div className="bg-gray-100 rounded-lg p-4 text-center">
-          <p className="text-sm text-gray-600 mb-2">
-            Jesteś administratorem?
-          </p>
-          <Link 
-            href="/admin/login" 
-            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-          >
-            Zaloguj się do panelu administratora
-          </Link>
-        </div>
-
         {/* Guest checkout info */}
         <div className="text-center">
           <p className="text-sm text-gray-500">
